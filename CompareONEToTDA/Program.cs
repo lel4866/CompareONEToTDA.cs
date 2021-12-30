@@ -4,9 +4,9 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
-using CompareONEToIB;
+using CompareONEToTDA;
 
-namespace CompareOneToIB;
+namespace CompareONEToTDA;
 
 // todo: rename OptionType to SecurityType
 public enum OptionType
@@ -179,8 +179,8 @@ static class Program
 {
     internal const string version = "0.0.3";
     internal const string version_date = "2021-12-27";
-    internal static string? broker_filename = null;
-    internal static string broker_directory = @"C:\Users\lel48\OneDrive\Documents\IBExport\";
+    internal static string? tda_filename = null;
+    internal static string tda_directory = @"C:\Users\lel48\OneDrive\Documents\TDAExport\";
     internal static string? one_filename = null;
     internal static string one_directory = @"C:\Users\lel48\OneDrive\Documents\ONEExport\";
     internal static string master_symbol = "SPX";
@@ -200,13 +200,13 @@ static class Program
     };
 
     // note: the ref is readonly, not the contents of the Dictionary
-    static readonly Dictionary<string, int> broker_columns = new(); // key is column name, value is column index
+    static readonly Dictionary<string, int> tda_columns = new(); // key is column name, value is column index
     static readonly Dictionary<string, int> one_trade_columns = new(); // key is column name, value is column index
     static readonly Dictionary<string, int> one_position_columns = new(); // key is column name, value is column index
     static readonly Dictionary<string, ONETrade> oneTrades = new(); // key is trade_id
 
     // key is (symbol, OptionType, Expiration, Strike); value is quantity
-    static readonly SortedDictionary<OptionKey, IBPosition> brokerPositions = new();
+    static readonly SortedDictionary<OptionKey, IBPosition> tdaPositions = new();
 
     // dictionry of ONE trades with key of trade id
     static readonly SortedDictionary<string, ONETrade> ONE_trades = new();
@@ -225,21 +225,21 @@ static class Program
 
         if (one_filename == null)
             one_filename = GetONEFileName();
-        if (broker_filename == null)
+        if (tda_filename == null)
         {
             if (tda)
-                broker_filename = GetTDAFileName();
+                tda_filename = GetTDAFileName();
             else
-                broker_filename = GetIBFileName();
+                tda_filename = GetIBFileName();
         }
-        if (one_filename == null || broker_filename == null)
+        if (one_filename == null || tda_filename == null)
             return -1;
 
         Console.WriteLine("\nProcessing ONE file: " + one_filename);
         if (tda)
-            Console.WriteLine("Processing TDA file: " + broker_filename);
+            Console.WriteLine("Processing TDA file: " + tda_filename);
         else
-            Console.WriteLine("Processing IB file: " + broker_filename);
+            Console.WriteLine("Processing IB file: " + tda_filename);
 
         bool rc = ProcessONEFile(one_filename);
         if (!rc)
@@ -248,9 +248,9 @@ static class Program
         // display ONE positions
         DisplayONEPositions();
         if (tda)
-            rc = ProcessTDAFile(broker_filename);
+            rc = ProcessTDAFile(tda_filename);
         else
-            rc = ProcessIBFile(broker_filename);
+            rc = ProcessIBFile(tda_filename);
         if (!rc)
             return -1;
 
@@ -304,7 +304,7 @@ static class Program
 
     static string? GetTDAFileName()
     {
-        Debug.Assert(Directory.Exists(broker_directory));
+        Debug.Assert(Directory.Exists(tda_directory));
 
         const string filename_pattern = "????-??-??-PositionStatement.csv"; // file names look like: yyyy-mm-dd-PositionStatement.csv
 
@@ -312,7 +312,7 @@ static class Program
         DateOnly latestDate = new(1000, 1, 1);
         string latest_full_filename = "";
 
-        files = Directory.GetFiles(broker_directory, filename_pattern, SearchOption.TopDirectoryOnly);
+        files = Directory.GetFiles(tda_directory, filename_pattern, SearchOption.TopDirectoryOnly);
         bool file_found = false;
         foreach (string full_filename in files)
         {
@@ -346,7 +346,7 @@ static class Program
 
     static string? GetIBFileName()
     {
-        Debug.Assert(Directory.Exists(broker_directory));
+        Debug.Assert(Directory.Exists(tda_directory));
 
         const string filename_pattern = "*.csv"; // file names look like: portfolio.20211208.csv
         const string portfolio_prefix = "portfolio."; // file names look like: portfolio.20211208.csv
@@ -359,7 +359,7 @@ static class Program
         DateOnly latestDate = new(1000, 1, 1);
         string latest_full_filename = "";
 
-        files = Directory.GetFiles(broker_directory, filename_pattern, SearchOption.TopDirectoryOnly);
+        files = Directory.GetFiles(tda_directory, filename_pattern, SearchOption.TopDirectoryOnly);
         bool file_found = false;
         foreach (string full_filename in files)
         {
@@ -456,12 +456,12 @@ static class Program
         {
             string column_name = column_names[i].Trim();
             if (column_name.Length > 0)
-                broker_columns.Add(column_name, i);
+                tda_columns.Add(column_name, i);
         }
         int index_of_last_required_column = 0;
         for (int i = 0; i < required_columns.Length; i++)
         {
-            if (!broker_columns.TryGetValue(required_columns[i], out int colnum))
+            if (!tda_columns.TryGetValue(required_columns[i], out int colnum))
             {
                 Console.WriteLine($"\n***Error*** IB file header must contain column named {required_columns[i]}");
                 return false;
@@ -527,12 +527,12 @@ static class Program
         {
             string column_name = column_names[i].Trim();
             if (column_name.Length > 0)
-                broker_columns.Add(column_name, i);
+                tda_columns.Add(column_name, i);
         }
         int index_of_last_required_column = 0;
         for (int i = 0; i < required_columns.Length; i++)
         {
-            if (!broker_columns.TryGetValue(required_columns[i], out int colnum))
+            if (!tda_columns.TryGetValue(required_columns[i], out int colnum))
             {
                 Console.WriteLine($"\n***Error*** IB file header must contain column named {required_columns[i]}");
                 return false;
@@ -597,7 +597,7 @@ static class Program
     {
         IBPosition ibPosition = new();
 
-        int quantity_col = broker_columns["Position"];
+        int quantity_col = tda_columns["Position"];
         bool rc = int.TryParse(fields[quantity_col], out ibPosition.quantity);
         if (!rc)
         {
@@ -633,10 +633,10 @@ static class Program
             return false;
         }
 #endif
-        int description_col = broker_columns["Financial Instrument Description"];
+        int description_col = tda_columns["Financial Instrument Description"];
         string description = fields[description_col];
 
-        int security_type_col = broker_columns["Security Type"];
+        int security_type_col = tda_columns["Security Type"];
         string security_type = fields[security_type_col].Trim();
         switch (security_type)
         {
@@ -664,7 +664,7 @@ static class Program
         }
 
         var ib_key = new OptionKey(ibPosition.symbol, ibPosition.optionType, ibPosition.expiration, ibPosition.strike);
-        if (brokerPositions.ContainsKey(ib_key))
+        if (tdaPositions.ContainsKey(ib_key))
         {
             if (ibPosition.optionType == OptionType.Put || ibPosition.optionType == OptionType.Call)
             {
@@ -680,7 +680,7 @@ static class Program
                 return -1;
             }
         }
-        brokerPositions.Add(ib_key, ibPosition);
+        tdaPositions.Add(ib_key, ibPosition);
         return 0;
     }
 
@@ -1220,7 +1220,7 @@ static class Program
             if (one_key.OptionType == OptionType.Stock)
                 continue;
 
-            if (!brokerPositions.TryGetValue(one_key, out IBPosition? ib_position))
+            if (!tdaPositions.TryGetValue(one_key, out IBPosition? ib_position))
             {
                 Console.WriteLine($"\n***Error*** ONE has a {one_key.OptionType} position in trade(s) {string.Join(",", one_trade_ids)}, with no matching position in IB:");
                 Console.WriteLine($"{one_key.Symbol}\t{one_key.OptionType}\tquantity: {one_quantity}\texpiration: {one_key.Expiration}\tstrike: {one_key.Strike}");
@@ -1245,7 +1245,7 @@ static class Program
         // ok...we've gone through all the ONE option positions, and tried to find associated IB positions. But...
         // there could still be IB option positions that have no corresponding ONE position
         // loop through all IB option positions, find associated ONE positions (if they don't exist, display error)
-        foreach (IBPosition position in brokerPositions.Values)
+        foreach (IBPosition position in tdaPositions.Values)
         {
             // ignore stock/futures positions...they've already been checked in VerifyStockPositions()
             if (position.optionType == OptionType.Stock || position.optionType == OptionType.Futures)
@@ -1282,14 +1282,14 @@ static class Program
 
         // get IB stock/futures positions
         // note that net IB position could be 0 even if stock/futures positions exist in IB
-        List<OptionKey> ib_stock_or_futures_keys = brokerPositions.Keys.Where(s => s.OptionType == OptionType.Stock || s.OptionType == OptionType.Futures).ToList();
+        List<OptionKey> ib_stock_or_futures_keys = tdaPositions.Keys.Where(s => s.OptionType == OptionType.Stock || s.OptionType == OptionType.Futures).ToList();
         float ib_stock_or_futures_quantity = 0f;
         foreach (OptionKey ib_stock_or_futures_key in ib_stock_or_futures_keys)
         {
             Dictionary<string, float> possible_ib_symbols = associated_symbols[master_symbol];
             Debug.Assert(possible_ib_symbols.ContainsKey(ib_stock_or_futures_key.Symbol));
             float multiplier = possible_ib_symbols[ib_stock_or_futures_key.Symbol];
-            float quantity = brokerPositions[ib_stock_or_futures_key].quantity;
+            float quantity = tdaPositions[ib_stock_or_futures_key].quantity;
             ib_stock_or_futures_quantity += multiplier * quantity;
         }
 
@@ -1440,7 +1440,7 @@ static class Program
     static void DisplayIBPositions()
     {
         Console.WriteLine($"IB Positions related to {master_symbol}:");
-        foreach (IBPosition position in brokerPositions.Values)
+        foreach (IBPosition position in tdaPositions.Values)
             DisplayIBPosition(position);
         //Console.WriteLine();
     }
