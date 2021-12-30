@@ -1,7 +1,7 @@
 # CompareONEToTDA.cs
 
 This program compares exported data from OptioneNet Explorer (ONE) to that from TD Ameritrade(TDA) to make
-sure that the option positions actually held in IB are the ones that are beng modeled by ONE.
+sure that the option positions actually held in TDA are the ones that are beng modeled by ONE.
 
 The program currently supports portfolios that contain index options for SPX, RUT, and NDX, stock positions in SPY, IWM, and QQQ, and
 futures positoons in ES, MES, RTY, M2K, NQ, and MNQ. However analysis can only been done on one class of positions at a time as specified
@@ -27,8 +27,8 @@ also determines the symbols for the stock/futures positions that will be taken i
 
 **--tdadir** can be used instead of --tdafile, It specifies a directory where your TDA files are saved.
 
-If you specify a directory (--onedir, --ibdir) instead of a file, the program will use the latest file in the directory whose name matches 
-the proper pattern (yyyy-mm-dd-ONEDetailReport.csv for ONE, and portfolio.yyyymmdd.csv or filtered_portfolio.yyyymmdd.csv for IB). 
+If you specify a directory (--onedir, --tdadir) instead of a file, the program will use the latest file in the directory whose name matches 
+the proper pattern (yyyy-mm-dd-ONEDetailReport.csv for ONE, and yyyy-mm-dd-PositionStatement.csv for TDA). 
 
 There are two optional command line arguments:
 
@@ -40,14 +40,14 @@ There are short names for each of the commands: -s, -of, -od, -tf, -td, -v, and 
 
 Sample command lines (from Windows Command Prompt):
 ```
-CompareONEToIB.exe -s spx -td C:\Users\username\TDAExport -od C:\Users\username\ONEExport > output.txt
-CompareONEToIB.exe --symbol spx --tdadir C:\Users\username\TDAExport --onedir C:\Users\username\ONEExport
+CompareONEToTDA.exe -s spx -td C:\Users\username\TDAExport -od C:\Users\username\ONEExport > output.txt
+CompareONEToTDA.exe --symbol spx --tdadir C:\Users\username\TDAExport --onedir C:\Users\username\ONEExport
 ```
 
 Sample command lines (from Windows Power Shell):
 ```
-./CompareONEToIB.exe -s spx -td C:\Users\username\TDAExport -od C:\Users\username\ONEExport > output.txt
-./CompareONEToIB.exe --symbol spx --tdadir C:\Users\username\TDAExport --onedir C:\Users\username\ONEExport
+./CompareONEToTDA.exe -s spx -td C:\Users\username\TDAExport -od C:\Users\username\ONEExport > output.txt
+./CompareONEToTDA.exe --symbol spx --tdadir C:\Users\username\TDAExport --onedir C:\Users\username\ONEExport
 ```
 
 Why specify the directories instead of the actual files? So you can just save newer files to the 
@@ -56,7 +56,8 @@ the files with the latest dates embedded in the filenames (It does not check the
 
 ## Exporting the TDA data
 
-The TDA data is exported by running Think or Swim
+The TDA data is exported by running Think or Swim, selecting the Monitor tab, then the Activities and Positions tab, 
+then clicking on the menu icon on the far right of the Position Statement window, and then selecting Export to File...
 
 ### This is what the TDA data looks like:
 
@@ -98,17 +99,17 @@ and selecting the account that holds the trades you want to compare with, then c
 ONE Detail Report
 
 Date/Time: 12/8/2021 08:28:42
-Filter: [Account] = 'IB1'
+Filter: [Account] = 'TDA1'
 Grouping: Account
 
 ,Account,Expiration,TradeId,TradeName,Underlying,Status,TradeType,OpenDate,CloseDate,DaysToExpiration,DaysInTrade,Margin,Comms,PnL,PnLperc
 ,,Account,TradeId,Date,Transaction,Qty,Symbol,Expiry,Type,Description,Underlying,Price,Commission
-IB1 
-,"IB1",12/3/2021,285,"244+1lp 2021-10-11 11:37",SPX,Open,Custom,10/11/2021 11:37 AM,,53,58,158973.30,46.46,13780.74,8.67
-,,"IB1",285,10/11/2021 11:37:32 AM,Buy,2,SPX   220319P04025000,3/18/2022,Put,SPX Mar22 4025 Put,SPX,113.92,2.28
-,,"IB1",285,10/11/2021 11:37:32 AM,Buy,4,SPX   220319P02725000,3/18/2022,Put,SPX Mar22 2725 Put,SPX,12.8,4.56
-,,"IB1",285,10/11/2021 11:37:32 AM,Sell,4,SPX   220319P03725000,3/18/2022,Put,SPX Mar22 3725 Put,SPX,68.77,4.56
-,,"IB1",285,10/11/2021 3:58:48 PM,Buy,1,SPXW  211204P03000000,12/3/2021,Put,SPX Dec21 3000 Put,SPX,2.7,1.5
+TDA1 
+,"TDA1",12/3/2021,285,"244+1lp 2021-10-11 11:37",SPX,Open,Custom,10/11/2021 11:37 AM,,53,58,158973.30,46.46,13780.74,8.67
+,,"TDA1",285,10/11/2021 11:37:32 AM,Buy,2,SPX   220319P04025000,3/18/2022,Put,SPX Mar22 4025 Put,SPX,113.92,2.28
+,,"TDA1",285,10/11/2021 11:37:32 AM,Buy,4,SPX   220319P02725000,3/18/2022,Put,SPX Mar22 2725 Put,SPX,12.8,4.56
+,,"TDA1",285,10/11/2021 11:37:32 AM,Sell,4,SPX   220319P03725000,3/18/2022,Put,SPX Mar22 3725 Put,SPX,68.77,4.56
+,,"TDA1",285,10/11/2021 3:58:48 PM,Buy,1,SPXW  211204P03000000,12/3/2021,Put,SPX Dec21 3000 Put,SPX,2.7,1.5
 ```
 
 ## This is sample output: 
@@ -214,7 +215,7 @@ SPXW Put     quantity: 2    expiration: 4/29/2022    strike: 3400   trade(s): 29
 SPXW Put     quantity: -4   expiration: 4/29/2022    strike: 4000   trade(s): 298
 SPXW Put     quantity: 2    expiration: 4/29/2022    strike: 4300   trade(s): 298
 
-IB Positions related to SPX:
+TDA Positions related to SPX:
 SPY  Stock   quantity: 100
 MES  Futures quantity: 1    expiration: 3/1/2022
 SPXW Put     quantity: 1    expiration: 1/14/2022    strike: 2700
