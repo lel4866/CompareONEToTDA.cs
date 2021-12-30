@@ -1,10 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Runtime.CompilerServices;
+﻿using System.Diagnostics;
 using System.Text.RegularExpressions;
-using CompareONEToTDA;
 
 namespace CompareONEToTDA;
 
@@ -349,7 +344,7 @@ static class Program
         int line_index = 0;
         string line = lines[line_index++];
         if (line.StartsWith(simulated_position_header)) {
-            Console.WriteLine($"***\nWarning*** TDA file starts with line containing phrase '{simulated_position_header}', which indicates these are just simulated positions.");
+            Console.WriteLine($"\n***Warning*** TDA file starts with line containing phrase '{simulated_position_header}', which indicates these are just simulated positions.");
             line = lines[line_index++];
         }
 
@@ -366,7 +361,7 @@ static class Program
         }
 
         // check for required columns and get index of last required column
-        string[] required_columns = { "Financial Instrument Description", "Position", "Security Type" };
+        string[] required_columns = { "Instrument", "Qty" };
         line = lines[line_index++];
         string[] column_names = line.Split(',');
         for (int i = 0; i < column_names.Length; i++)
@@ -444,54 +439,26 @@ static class Program
     {
         TDAPosition tdaPosition = new();
 
-        int quantity_col = tda_columns["Position"];
+        int quantity_col = tda_columns["Qty"];
         bool rc = int.TryParse(fields[quantity_col], out tdaPosition.quantity);
         if (!rc)
         {
             Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid Position: {fields[quantity_col]}");
             return -1;
         }
-#if false
-        rc = float.TryParse(fields[3], out tdaPosition.marketPrice);
-        if (!rc)
-        {
-            Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid Market Price: {fields[3]}");
-            return false;
-        }
 
-        rc = float.TryParse(fields[5], out tdaPosition.averagePrice);
-        if (!rc)
-        {
-            Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid Average Price: {fields[5]}");
-            return false;
-        }
-
-        rc = float.TryParse(fields[6], out tdaPosition.unrealizedPnL);
-        if (!rc)
-        {
-            Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid Unrealized P&L: {fields[6]}");
-            return false;
-        }
-
-        rc = float.TryParse(fields[7], out tdaPosition.realizedPnL);
-        if (!rc)
-        {
-            Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid Realized P&L: {fields[7]}");
-            return false;
-        }
-#endif
-        int description_col = tda_columns["Financial Instrument Description"];
-        string description = fields[description_col];
+        int instrument_col = tda_columns["Instrument"];
+        string instrument = fields[instrument_col];
 
         int security_type_col = tda_columns["Security Type"];
         string security_type = fields[security_type_col].Trim();
         switch (security_type)
         {
             case "OPT":
-                rc = ParseOptionSpec(description, @".*\[(\w+) +(.+) \w+\]$", out tdaPosition.symbol, out tdaPosition.optionType, out tdaPosition.expiration, out tdaPosition.strike);
+                rc = ParseOptionSpec(instrument, @".*\[(\w+) +(.+) \w+\]$", out tdaPosition.symbol, out tdaPosition.optionType, out tdaPosition.expiration, out tdaPosition.strike);
                 if (!rc)
                 {
-                    Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid option specification: {fields[description_col]}");
+                    Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid option specification: {fields[instrument_col]}");
                     return -1;
                 }
 
@@ -500,7 +467,7 @@ static class Program
             case "FUT":
                 //MES      MAR2022,1,USD,4624.50,23122.50,4625.604,-5.52,0.00,No,FUT,23136.14
                 tdaPosition.optionType = OptionType.Futures;
-                rc = ParseFuturesSpec(description, @"(\w+) +(\w+)$", out tdaPosition.symbol, out tdaPosition.expiration);
+                rc = ParseFuturesSpec(instrument, @"(\w+) +(\w+)$", out tdaPosition.symbol, out tdaPosition.expiration);
                 break;
 
             case "STK":

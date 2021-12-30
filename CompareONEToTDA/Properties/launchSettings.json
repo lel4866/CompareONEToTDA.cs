@@ -2,7 +2,7 @@
   "profiles": {
     "CompareONEToTDA": {
       "commandName": "Project",
-      "commandLineArgs": "-s spx -if C:\\Users\\lel48\\OneDrive\\Documents\\IBExport\\portfolio.20211223.csv -od C:\\Users\\lel48\\OneDrive\\Documents\\ONEExport "
+      "commandLineArgs": "-s spx -tf C:\\Users\\lel48\\OneDrive\\Documents\\TDAExport\\2021-12-29-PositionStatement.csv -od C:\\Users\\lel48\\OneDrive\\Documents\\ONEExport "
     }
   }
 }
