@@ -24,7 +24,7 @@ enum TradeStatus
 }
 
 //,Account,Expiration,TradeId,TradeName,Underlying,Status,TradeType,OpenDate,CloseDate,DaysToExpiration,DaysInTrade,Margin,Comms,PnL,PnLperc
-//,"IB1",12/3/2021,285,"244+1lp 2021-10-11 11:37", SPX, Open, Custom,10/11/2021 11:37 AM,,53,58,158973.30,46.46,13780.74,8.67
+//,"TDA1",12/3/2021,285,"244+1lp 2021-10-11 11:37", SPX, Open, Custom,10/11/2021 11:37 AM,,53,58,158973.30,46.46,13780.74,8.67
 class ONETrade
 {
     public string account = "";
@@ -45,7 +45,7 @@ class ONETrade
 }
 
 //,,Account,TradeId,Date,Transaction,Qty,Symbol,Expiry,Type,Description,Underlying,Price,Commission
-//,,"IB1",285,10/11/2021 11:37:32 AM,Buy,2,SPX   220319P04025000,3/18/2022,Put,SPX Mar22 4025 Put,SPX,113.92,2.28
+//,,"TDA1",285,10/11/2021 11:37:32 AM,Buy,2,SPX   220319P04025000,3/18/2022,Put,SPX Mar22 4025 Put,SPX,113.92,2.28
 class ONEPosition
 {
     public string account = "";
@@ -158,7 +158,7 @@ public class OptionKey : IComparable<OptionKey>
 
 //Financial Instrument Description, Position, Currency, Market Price, Market Value, Average Price, Unrealized P&L, Realized P&L, Liquidate Last, Security Type, Delta Dollars
 //SPX APR2022 4300 P [SPXW  220429P04300000 100],2,USD,119.5072021,23901.44,123.5542635,-809.41,0.00,No,OPT,-246454.66
-class IBPosition
+class TDAPosition
 {
     public OptionType optionType; // just Put, Call, or Stock...futures are converted to equivalent SPX stock...so is SPY
     public string symbol = ""; // SPX, SPXW, etc
@@ -185,13 +185,12 @@ static class Program
     internal static string one_directory = @"C:\Users\lel48\OneDrive\Documents\ONEExport\";
     internal static string master_symbol = "SPX";
     internal static string one_account = "";
-    internal static bool tda = false; // this switches between TD Ameritrade files and Interactive Broker files
 
-    // ONE uses the main index symbol for positions in the underlying, wheras IB uses an actual stock/futures symbol
+    // ONE uses the main index symbol for positions in the underlying, whereas TDA uses an actual stock/futures symbol
     // so...to reconcile these, if ONE has a position, say, of 10 SPX, this could be equivalent to 2 MES contracts,
     // 100 SPY shares, or some combination, like 1 MES contract and 50 SPY shares
     // So...the float is the number of ONE SPX shares that a share of the given item represents. So, { "SPY", 0.1f }
-    // means that 1 share of SPY in IB represents 0.1 shares of SPX in ONE
+    // means that 1 share of SPY in TDA represents 0.1 shares of SPX in ONE
     internal static Dictionary<string, Dictionary<string, float>> associated_symbols = new()
     {
         { "SPX", new Dictionary<string, float> { { "SPY", 0.1f }, { "MES", 5f }, { "ES", 50f } } },
@@ -206,7 +205,7 @@ static class Program
     static readonly Dictionary<string, ONETrade> oneTrades = new(); // key is trade_id
 
     // key is (symbol, OptionType, Expiration, Strike); value is quantity
-    static readonly SortedDictionary<OptionKey, IBPosition> tdaPositions = new();
+    static readonly SortedDictionary<OptionKey, TDAPosition> tdaPositions = new();
 
     // dictionry of ONE trades with key of trade id
     static readonly SortedDictionary<string, ONETrade> ONE_trades = new();
@@ -221,25 +220,17 @@ static class Program
 
         // calls System.Environment.Exit(-1) if bad command line arguments
         CommandLine.ProcessCommandLineArguments(args);
-        Console.WriteLine($"CompareONEToIB Version {version}, {version_date}. Processing trades for {master_symbol}");
+        Console.WriteLine($"CompareONEToTDA Version {version}, {version_date}. Processing trades for {master_symbol}");
 
         if (one_filename == null)
             one_filename = GetONEFileName();
         if (tda_filename == null)
-        {
-            if (tda)
-                tda_filename = GetTDAFileName();
-            else
-                tda_filename = GetIBFileName();
-        }
+            tda_filename = GetTDAFileName();
         if (one_filename == null || tda_filename == null)
             return -1;
 
         Console.WriteLine("\nProcessing ONE file: " + one_filename);
-        if (tda)
-            Console.WriteLine("Processing TDA file: " + tda_filename);
-        else
-            Console.WriteLine("Processing IB file: " + tda_filename);
+        Console.WriteLine("Processing TDA file: " + tda_filename);
 
         bool rc = ProcessONEFile(one_filename);
         if (!rc)
@@ -247,17 +238,14 @@ static class Program
 
         // display ONE positions
         DisplayONEPositions();
-        if (tda)
-            rc = ProcessTDAFile(tda_filename);
-        else
-            rc = ProcessIBFile(tda_filename);
+        rc = ProcessTDAFile(tda_filename);
         if (!rc)
             return -1;
 
-        // display IB positions
-        DisplayIBPositions();
+        // display TDA positions
+        DisplayTDAPositions();
 
-        rc = CompareONEPositionsToIBPositions();
+        rc = CompareONEPositionsToTDAPositions();
         if (!rc)
             return -1;
 
@@ -344,77 +332,6 @@ static class Program
         return latest_full_filename;
     }
 
-    static string? GetIBFileName()
-    {
-        Debug.Assert(Directory.Exists(tda_directory));
-
-        const string filename_pattern = "*.csv"; // file names look like: portfolio.20211208.csv
-        const string portfolio_prefix = "portfolio."; // file names look like: portfolio.20211208.csv
-        const string filtered_portfolio_prefix = "filtered_portfolio."; // file names look like: portfolio.20211208.csv
-        int filename_prefix1_len = portfolio_prefix.Length;
-        int filename_prefix2_len = filtered_portfolio_prefix.Length;
-        bool latest_full_filename_is_filtered_portfolio = false;
-
-        string[] files;
-        DateOnly latestDate = new(1000, 1, 1);
-        string latest_full_filename = "";
-
-        files = Directory.GetFiles(tda_directory, filename_pattern, SearchOption.TopDirectoryOnly);
-        bool file_found = false;
-        foreach (string full_filename in files)
-        {
-            string filename = Path.GetFileName(full_filename);
-            string datestr;
-            if (filename.StartsWith(portfolio_prefix))
-                datestr = filename[filename_prefix1_len..];
-            else if (filename.StartsWith(filtered_portfolio_prefix))
-                datestr = filename[filename_prefix2_len..];
-            else
-                continue;
-
-            if (datestr.Length != 12) // yyyymmdd.csv
-                continue;
-            if (!int.TryParse(datestr[..4], out int year))
-                continue;
-            if (!int.TryParse(datestr.AsSpan(4, 2), out int month))
-                continue;
-            if (!int.TryParse(datestr.AsSpan(6, 2), out int day))
-                continue;
-
-            file_found = true;
-            DateOnly dt = new(year, month, day);
-            if (dt > latestDate)
-            {
-                latestDate = dt;
-                latest_full_filename = full_filename;
-                latest_full_filename_is_filtered_portfolio = filename.StartsWith(filtered_portfolio_prefix);
-            }
-            else if (dt == latestDate)
-            {
-                // same dates in filenames...must be one file starts with "filtered_portfolio" and the other with just "portfolio"
-                Debug.Assert((latest_full_filename_is_filtered_portfolio && filename.StartsWith(portfolio_prefix)) || (!latest_full_filename_is_filtered_portfolio && filename.StartsWith(filtered_portfolio_prefix)));
-
-                // choose the one with the latest timestamp
-                DateTime cur_filename_write_date = File.GetLastWriteTime(full_filename);
-                DateTime saved_filename_write_date = File.GetLastWriteTime(latest_full_filename);
-                if (cur_filename_write_date >= saved_filename_write_date)
-                {
-                    latestDate = dt;
-                    latest_full_filename = full_filename;
-                    latest_full_filename_is_filtered_portfolio = filename.StartsWith(filtered_portfolio_prefix);
-                }
-            }
-        }
-
-        if (!file_found)
-        {
-            Console.WriteLine("\n***Error*** No IB files found with following filename pattern: [filtered_]portfolio.yyyymmdd.csv");
-            return null;
-        }
-
-        return latest_full_filename;
-    }
-
     //Portfolio
     //Financial Instrument Description, Position, Currency, Market Price, Market Value, Average Price, Unrealized P&L, Realized P&L, Liquidate Last, Security Type, Delta Dollars
     //SPX APR2022 4300 P [SPXW  220429P04300000 100],2,USD,119.5072021,23901.44,123.5542635,-809.41,0.00,No,OPT,-246454.66
@@ -463,7 +380,7 @@ static class Program
         {
             if (!tda_columns.TryGetValue(required_columns[i], out int colnum))
             {
-                Console.WriteLine($"\n***Error*** IB file header must contain column named {required_columns[i]}");
+                Console.WriteLine($"\n***Error*** TDA file header must contain column named {required_columns[i]}");
                 return false;
             }
             index_of_last_required_column = Math.Max(colnum, index_of_last_required_column);
@@ -483,81 +400,11 @@ static class Program
 
             if (fields.Count < index_of_last_required_column + 1)
             {
-                Console.WriteLine($"\n***Error*** IB position line #{line_index + 1} must have {index_of_last_required_column + 1} fields, not {fields.Count} fields");
+                Console.WriteLine($"\n***Error*** TDA position line #{line_index + 1} must have {index_of_last_required_column + 1} fields, not {fields.Count} fields");
                 return false;
             }
 
-            int irc = ParseIBPositionLine(line_index, fields);
-            if (irc != 0)
-            {
-                // if irc == -1, error parsing line
-                if (irc < 0)
-                    return false;
-                // irc +1, irrelevant symbol - ignore line
-            }
-        }
-
-        return true;
-    }
-
-    //Portfolio
-    //Financial Instrument Description, Position, Currency, Market Price, Market Value, Average Price, Unrealized P&L, Realized P&L, Liquidate Last, Security Type, Delta Dollars
-    //SPX APR2022 4300 P [SPXW  220429P04300000 100],2,USD,119.5072021,23901.44,123.5542635,-809.41,0.00,No,OPT,-246454.66
-    static bool ProcessIBFile(string full_filename)
-    {
-        string[] lines = File.ReadAllLines(full_filename);
-        if (lines.Length < 3)
-        {
-            Console.WriteLine("\n***Error*** IB File must contain at least 3 lines");
-            return false;
-        }
-
-        string line1 = lines[0].Trim();
-        if (line1 != "Portfolio")
-        {
-            Console.WriteLine("***\nError*** First line of IB file must be 'Portfolio'");
-            return false;
-        }
-
-        // check for required columns and get index of last required column
-        string[] required_columns = { "Financial Instrument Description", "Position", "Security Type" };
-        line1 = lines[1].Trim();
-        string[] column_names = line1.Split(',');
-        for (int i = 0; i < column_names.Length; i++)
-        {
-            string column_name = column_names[i].Trim();
-            if (column_name.Length > 0)
-                tda_columns.Add(column_name, i);
-        }
-        int index_of_last_required_column = 0;
-        for (int i = 0; i < required_columns.Length; i++)
-        {
-            if (!tda_columns.TryGetValue(required_columns[i], out int colnum))
-            {
-                Console.WriteLine($"\n***Error*** IB file header must contain column named {required_columns[i]}");
-                return false;
-            }
-            index_of_last_required_column = Math.Max(colnum, index_of_last_required_column);
-        }
-
-        // now process each IB position line
-        for (int line_index = 2; line_index < lines.Length; line_index++)
-        {
-            bool rc = ParseCSVLine(lines[line_index], out List<string> fields);
-            if (!rc)
-                return false;
-
-            // blank line terminates list of positions. Next line must be "Cash Balances"
-            if (fields.Count == 0)
-                break;
-
-            if (fields.Count < index_of_last_required_column + 1)
-            {
-                Console.WriteLine($"\n***Error*** IB position line #{line_index + 1} must have {index_of_last_required_column + 1} fields, not {fields.Count} fields");
-                return false;
-            }
-
-            int irc = ParseIBPositionLine(line_index, fields);
+            int irc = ParseTDAPositionLine(line_index, fields);
             if (irc != 0)
             {
                 // if irc == -1, error parsing line
@@ -593,43 +440,43 @@ static class Program
     //MES MAR2022,1, USD,4624.50,23122.50,4625.604,-5.52,0.00, No, FUT,23136.14
 
     // returns 0 if line was parsed successfully, -1 if there was an error, 1 if line parsed ok, but is for symbol not relevant to this analysis
-    static int ParseIBPositionLine(int line_index, List<string> fields)
+    static int ParseTDAPositionLine(int line_index, List<string> fields)
     {
-        IBPosition ibPosition = new();
+        TDAPosition tdaPosition = new();
 
         int quantity_col = tda_columns["Position"];
-        bool rc = int.TryParse(fields[quantity_col], out ibPosition.quantity);
+        bool rc = int.TryParse(fields[quantity_col], out tdaPosition.quantity);
         if (!rc)
         {
-            Console.WriteLine($"***Error*** in #{line_index + 1} in IB file: invalid Position: {fields[quantity_col]}");
+            Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid Position: {fields[quantity_col]}");
             return -1;
         }
 #if false
-        rc = float.TryParse(fields[3], out ibPosition.marketPrice);
+        rc = float.TryParse(fields[3], out tdaPosition.marketPrice);
         if (!rc)
         {
-            Console.WriteLine($"***Error*** in #{line_index + 1} in IB file: invalid Market Price: {fields[3]}");
+            Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid Market Price: {fields[3]}");
             return false;
         }
 
-        rc = float.TryParse(fields[5], out ibPosition.averagePrice);
+        rc = float.TryParse(fields[5], out tdaPosition.averagePrice);
         if (!rc)
         {
-            Console.WriteLine($"***Error*** in #{line_index + 1} in IB file: invalid Average Price: {fields[5]}");
+            Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid Average Price: {fields[5]}");
             return false;
         }
 
-        rc = float.TryParse(fields[6], out ibPosition.unrealizedPnL);
+        rc = float.TryParse(fields[6], out tdaPosition.unrealizedPnL);
         if (!rc)
         {
-            Console.WriteLine($"***Error*** in #{line_index + 1} in IB file: invalid Unrealized P&L: {fields[6]}");
+            Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid Unrealized P&L: {fields[6]}");
             return false;
         }
 
-        rc = float.TryParse(fields[7], out ibPosition.realizedPnL);
+        rc = float.TryParse(fields[7], out tdaPosition.realizedPnL);
         if (!rc)
         {
-            Console.WriteLine($"***Error*** in #{line_index + 1} in IB file: invalid Realized P&L: {fields[7]}");
+            Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid Realized P&L: {fields[7]}");
             return false;
         }
 #endif
@@ -641,10 +488,10 @@ static class Program
         switch (security_type)
         {
             case "OPT":
-                rc = ParseOptionSpec(description, @".*\[(\w+) +(.+) \w+\]$", out ibPosition.symbol, out ibPosition.optionType, out ibPosition.expiration, out ibPosition.strike);
+                rc = ParseOptionSpec(description, @".*\[(\w+) +(.+) \w+\]$", out tdaPosition.symbol, out tdaPosition.optionType, out tdaPosition.expiration, out tdaPosition.strike);
                 if (!rc)
                 {
-                    Console.WriteLine($"***Error*** in #{line_index + 1} in IB file: invalid option specification: {fields[description_col]}");
+                    Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid option specification: {fields[description_col]}");
                     return -1;
                 }
 
@@ -652,35 +499,35 @@ static class Program
 
             case "FUT":
                 //MES      MAR2022,1,USD,4624.50,23122.50,4625.604,-5.52,0.00,No,FUT,23136.14
-                ibPosition.optionType = OptionType.Futures;
-                rc = ParseFuturesSpec(description, @"(\w+) +(\w+)$", out ibPosition.symbol, out ibPosition.expiration);
+                tdaPosition.optionType = OptionType.Futures;
+                rc = ParseFuturesSpec(description, @"(\w+) +(\w+)$", out tdaPosition.symbol, out tdaPosition.expiration);
                 break;
 
             case "STK":
                 //SPY,100,USD,463.3319397,46333.19,463.02,31.19,0.00,No,STK,46333.19
-                ibPosition.optionType = OptionType.Stock;
-                ibPosition.symbol = fields[0].Trim();
+                tdaPosition.optionType = OptionType.Stock;
+                tdaPosition.symbol = fields[0].Trim();
                 break;
         }
 
-        var ib_key = new OptionKey(ibPosition.symbol, ibPosition.optionType, ibPosition.expiration, ibPosition.strike);
-        if (tdaPositions.ContainsKey(ib_key))
+        var tda_key = new OptionKey(tdaPosition.symbol, tdaPosition.optionType, tdaPosition.expiration, tdaPosition.strike);
+        if (tdaPositions.ContainsKey(tda_key))
         {
-            if (ibPosition.optionType == OptionType.Put || ibPosition.optionType == OptionType.Call)
+            if (tdaPosition.optionType == OptionType.Put || tdaPosition.optionType == OptionType.Call)
             {
-                Console.WriteLine($"***Error*** in #{line_index + 1} in IB file: duplicate expiration/strike ({ibPosition.symbol} {ibPosition.optionType} {ibPosition.expiration},{ibPosition.strike})");
+                Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: duplicate expiration/strike ({tdaPosition.symbol} {tdaPosition.optionType} {tdaPosition.expiration},{tdaPosition.strike})");
                 return -1;
             }
             else
             {
-                if (ibPosition.optionType == OptionType.Futures)
-                    Console.WriteLine($"***Error*** in #{line_index + 1} in IB file: duplicate futures entry ({ibPosition.symbol} {ibPosition.expiration})");
+                if (tdaPosition.optionType == OptionType.Futures)
+                    Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: duplicate futures entry ({tdaPosition.symbol} {tdaPosition.expiration})");
                 else
-                    Console.WriteLine($"***Error*** in #{line_index + 1} in IB file: duplicate stock entry ({ibPosition.symbol})");
+                    Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: duplicate stock entry ({tdaPosition.symbol})");
                 return -1;
             }
         }
-        tdaPositions.Add(ib_key, ibPosition);
+        tdaPositions.Add(tda_key, tdaPosition);
         return 0;
     }
 
@@ -731,16 +578,16 @@ static class Program
     //ONE Detail Report
     //
     //Date/Time: 12/8/2021 08:28:42
-    //Filter: [Account] = 'IB1'
+    //Filter: [Account] = 'TDA1'
     //Grouping: Account
     //
     //,Account,Expiration,TradeId,TradeName,Underlying,Status,TradeType,OpenDate,CloseDate,DaysToExpiration,DaysInTrade,Margin,Comms,PnL,PnLperc
     //,,Account,TradeId,Date,Transaction,Qty,Symbol,Expiry,Type,Description,Underlying,Price,Commission
-    //IB1
-    //,"IB1",12/3/2021,285,"244+1lp 2021-10-11 11:37", SPX, Open, Custom,10/11/2021 11:37 AM,,53,58,158973.30,46.46,13780.74,8.67
-    //,,"IB1",285,10/11/2021 11:37:32 AM,Buy,2,SPX   220319P04025000,3/18/2022,Put,SPX Mar22 4025 Put,SPX,113.92,2.28
-    //,,"IB1",285,10/11/2021 11:37:32 AM,Buy,4,SPX   220319P02725000,3/18/2022,Put,SPX Mar22 2725 Put,SPX,12.8,4.56
-    //,,"IB1",296,11/12/2021 11:02:02 AM,Buy,1,SPX,,Stock,SPX Stock, SPX,4660.05,0.005
+    //TDA1
+    //,"TD1",12/3/2021,285,"244+1lp 2021-10-11 11:37", SPX, Open, Custom,10/11/2021 11:37 AM,,53,58,158973.30,46.46,13780.74,8.67
+    //,,"TDA1",285,10/11/2021 11:37:32 AM,Buy,2,SPX   220319P04025000,3/18/2022,Put,SPX Mar22 4025 Put,SPX,113.92,2.28
+    //,,"TDA1",285,10/11/2021 11:37:32 AM,Buy,4,SPX   220319P02725000,3/18/2022,Put,SPX Mar22 2725 Put,SPX,12.8,4.56
+    //,,"TDA1",296,11/12/2021 11:02:02 AM,Buy,1,SPX,,Stock,SPX Stock, SPX,4660.05,0.005
     static bool ProcessONEFile(string full_filename)
     {
         string[] lines = File.ReadAllLines(full_filename);
@@ -1016,7 +863,7 @@ static class Program
     }
 
     // ",Account,Expiration,TradeId,TradeName,Underlying,Status,TradeType,OpenDate,CloseDate,DaysToExpiration,DaysInTrade,Margin,Comms,PnL,PnLperc"
-    //,"IB1",12/3/2021,285,"244+1lp 2021-10-11 11:37", SPX, Open, Custom,10/11/2021 11:37 AM,,53,58,158973.30,46.46,13780.74,8.67
+    //,"TDA1",12/3/2021,285,"244+1lp 2021-10-11 11:37", SPX, Open, Custom,10/11/2021 11:37 AM,,53,58,158973.30,46.46,13780.74,8.67
     // we don't parse Margin,Comms,PnL,PnLperc
     static ONETrade? ParseONETradeLine(int line_index, List<string> fields)
     {
@@ -1105,8 +952,8 @@ static class Program
     }
 
     //,,Account,TradeId,Date,Transaction,Qty,Symbol,Expiry,Type,Description,Underlying,Price,Commission
-    //,,"IB1",285,10/11/2021 11:37:32 AM,Buy,2,SPX   220319P04025000,3/18/2022,Put,SPX Mar22 4025 Put,SPX,113.92,2.28
-    //,,"IB1",294,11/1/2021 12:24:57 PM,Buy,2,SPX,,Stock,SPX Stock, SPX,4609.8,0.01
+    //,,"TDA1",285,10/11/2021 11:37:32 AM,Buy,2,SPX   220319P04025000,3/18/2022,Put,SPX Mar22 4025 Put,SPX,113.92,2.28
+    //,,"TDA1",294,11/1/2021 12:24:57 PM,Buy,2,SPX,,Stock,SPX Stock, SPX,4609.8,0.01
     // note there is no Futures position in ONE...a Futures position is represented as Stock
     static ONEPosition? ParseONEPositionLine(int line_index, List<string> fields, string trade_id)
     {
@@ -1203,12 +1050,12 @@ static class Program
         return position;
     }
 
-    static bool CompareONEPositionsToIBPositions()
+    static bool CompareONEPositionsToTDAPositions()
     {
-        // verify that ONE Index position (if any) matches IB Stock, Futures positons
+        // verify that ONE Index position (if any) matches TDA Stock, Futures positons
         bool rc = VerifyStockPositions();
 
-        // go through each consolidated ONE option position (whose quantity is != 0) and find it's associated IB Position
+        // go through each consolidated ONE option position (whose quantity is != 0) and find it's associated TDA Position
         foreach ((OptionKey one_key, (int one_quantity, HashSet<string> one_trade_ids)) in consolidatedOnePositions)
         {
             if (one_quantity == 0)
@@ -1220,32 +1067,32 @@ static class Program
             if (one_key.OptionType == OptionType.Stock)
                 continue;
 
-            if (!tdaPositions.TryGetValue(one_key, out IBPosition? ib_position))
+            if (!tdaPositions.TryGetValue(one_key, out TDAPosition? tda_position))
             {
-                Console.WriteLine($"\n***Error*** ONE has a {one_key.OptionType} position in trade(s) {string.Join(",", one_trade_ids)}, with no matching position in IB:");
+                Console.WriteLine($"\n***Error*** ONE has a {one_key.OptionType} position in trade(s) {string.Join(",", one_trade_ids)}, with no matching position in TDA:");
                 Console.WriteLine($"{one_key.Symbol}\t{one_key.OptionType}\tquantity: {one_quantity}\texpiration: {one_key.Expiration}\tstrike: {one_key.Strike}");
                 rc = false;
                 continue;
             }
 
-            if (one_quantity != ib_position.quantity)
+            if (one_quantity != tda_position.quantity)
             {
-                Console.WriteLine($"\n***Error*** ONE has a {one_key.OptionType} position in trade(s) {string.Join(",", one_trade_ids)}, whose quantity ({one_quantity}) does not match IB quantity ({ib_position.quantity}):");
+                Console.WriteLine($"\n***Error*** ONE has a {one_key.OptionType} position in trade(s) {string.Join(",", one_trade_ids)}, whose quantity ({one_quantity}) does not match TDA quantity ({tda_position.quantity}):");
                 Console.WriteLine($"{one_key.Symbol}\t{one_key.OptionType}\tquantity: {one_quantity}\texpiration: {one_key.Expiration}\tstrike: {one_key.Strike}");
                 rc = false;
             }
 
-            // save one position reference in ib position
-            ib_position.oneTrades = one_trade_ids;
+            // save one position reference in TDA position
+            tda_position.oneTrades = one_trade_ids;
 
             // add one_position quantity to accounted_for_quantity...this will be checked later
-            ib_position.one_quantity += one_quantity;
+            tda_position.one_quantity += one_quantity;
         }
 
-        // ok...we've gone through all the ONE option positions, and tried to find associated IB positions. But...
-        // there could still be IB option positions that have no corresponding ONE position
-        // loop through all IB option positions, find associated ONE positions (if they don't exist, display error)
-        foreach (IBPosition position in tdaPositions.Values)
+        // ok...we've gone through all the ONE option positions, and tried to find associated TDA positions. But...
+        // there could still be TDA option positions that have no corresponding ONE position
+        // loop through all TDA option positions, find associated ONE positions (if they don't exist, display error)
+        foreach (TDAPosition position in tdaPositions.Values)
         {
             // ignore stock/futures positions...they've already been checked in VerifyStockPositions()
             if (position.optionType == OptionType.Stock || position.optionType == OptionType.Futures)
@@ -1255,8 +1102,8 @@ static class Program
             {
                 if (position.one_quantity == 0)
                 {
-                    Console.WriteLine($"\n***Error*** IB has a {position.optionType} position with no matching position in ONE");
-                    DisplayIBPosition(position);
+                    Console.WriteLine($"\n***Error*** TDA has a {position.optionType} position with no matching position in ONE");
+                    DisplayTDAPosition(position);
                     rc = false;
                 }
             }
@@ -1265,7 +1112,7 @@ static class Program
         return rc;
     }
 
-    // make sure that any Index position in ONE is matched by stock/futures positionin IB and vice versa
+    // make sure that any Index position in ONE is matched by stock/futures positionin TDA and vice versa
     static bool VerifyStockPositions()
     {
         // get ONE consolidated index position
@@ -1280,46 +1127,46 @@ static class Program
             Debug.Assert(one_quantity != 0);
         }
 
-        // get IB stock/futures positions
-        // note that net IB position could be 0 even if stock/futures positions exist in IB
-        List<OptionKey> ib_stock_or_futures_keys = tdaPositions.Keys.Where(s => s.OptionType == OptionType.Stock || s.OptionType == OptionType.Futures).ToList();
-        float ib_stock_or_futures_quantity = 0f;
-        foreach (OptionKey ib_stock_or_futures_key in ib_stock_or_futures_keys)
+        // get TDA stock/futures positions
+        // note that net TDA position could be 0 even if stock/futures positions exist in TDA
+        List<OptionKey> tda_stock_or_futures_keys = tdaPositions.Keys.Where(s => s.OptionType == OptionType.Stock || s.OptionType == OptionType.Futures).ToList();
+        float tda_stock_or_futures_quantity = 0f;
+        foreach (OptionKey tda_stock_or_futures_key in tda_stock_or_futures_keys)
         {
-            Dictionary<string, float> possible_ib_symbols = associated_symbols[master_symbol];
-            Debug.Assert(possible_ib_symbols.ContainsKey(ib_stock_or_futures_key.Symbol));
-            float multiplier = possible_ib_symbols[ib_stock_or_futures_key.Symbol];
-            float quantity = tdaPositions[ib_stock_or_futures_key].quantity;
-            ib_stock_or_futures_quantity += multiplier * quantity;
+            Dictionary<string, float> possible_tda_symbols = associated_symbols[master_symbol];
+            Debug.Assert(possible_tda_symbols.ContainsKey(tda_stock_or_futures_key.Symbol));
+            float multiplier = possible_tda_symbols[tda_stock_or_futures_key.Symbol];
+            float quantity = tdaPositions[tda_stock_or_futures_key].quantity;
+            tda_stock_or_futures_quantity += multiplier * quantity;
         }
 
-        if (one_quantity == ib_stock_or_futures_quantity)
+        if (one_quantity == tda_stock_or_futures_quantity)
             return true;
 
-        // at this point, ONE's net Index position does not match IB's net stock/futures position. 
+        // at this point, ONE's net Index position does not match TDA's net stock/futures position. 
         // note that either position could be 0
-        if (ib_stock_or_futures_quantity == 0)
+        if (tda_stock_or_futures_quantity == 0)
         {
             Debug.Assert(one_quantity > 0);
             Debug.Assert(one_trade_ids.Count > 0);
-            Console.WriteLine($"\n***Error*** ONE has an index position in {master_symbol} of {one_quantity} shares, in trade(s) {string.Join(",", one_trade_ids)}, while IB has no matching positions");
+            Console.WriteLine($"\n***Error*** ONE has an index position in {master_symbol} of {one_quantity} shares, in trade(s) {string.Join(",", one_trade_ids)}, while TDA has no matching positions");
             return false;
         }
 
         if (one_quantity == 0)
         {
-            Debug.Assert(ib_stock_or_futures_quantity > 0);
-            Console.WriteLine($"\n***Error*** IB has stock/futures positions of {ib_stock_or_futures_quantity} equivalent {master_symbol} shares, while ONE has no matching positions");
-            // todo: list IB positions
+            Debug.Assert(tda_stock_or_futures_quantity > 0);
+            Console.WriteLine($"\n***Error*** TDA has stock/futures positions of {tda_stock_or_futures_quantity} equivalent {master_symbol} shares, while ONE has no matching positions");
+            // todo: list TDA positions
             return false;
         }
 
-        // at this point, both ONE and IB have index positions...just not same quantity
+        // at this point, both ONE and TDA have index positions...just not same quantity
 
         Debug.Assert(one_stock_keys.Count == 1);
         Debug.Assert(one_quantity != 0);
-        Debug.Assert(ib_stock_or_futures_quantity != one_quantity);
-        Console.WriteLine($"\n***Error*** ONE has an index position in {master_symbol} of {one_quantity} shares, in trade(s) {string.Join(",", one_trade_ids)}, while IB has {ib_stock_or_futures_quantity} equivalent {master_symbol} shares");
+        Debug.Assert(tda_stock_or_futures_quantity != one_quantity);
+        Console.WriteLine($"\n***Error*** ONE has an index position in {master_symbol} of {one_quantity} shares, in trade(s) {string.Join(",", one_trade_ids)}, while TDA has {tda_stock_or_futures_quantity} equivalent {master_symbol} shares");
         return false;
     }
 
@@ -1437,15 +1284,15 @@ static class Program
         Console.WriteLine();
     }
 
-    static void DisplayIBPositions()
+    static void DisplayTDAPositions()
     {
-        Console.WriteLine($"IB Positions related to {master_symbol}:");
-        foreach (IBPosition position in tdaPositions.Values)
-            DisplayIBPosition(position);
+        Console.WriteLine($"TDA Positions related to {master_symbol}:");
+        foreach (TDAPosition position in tdaPositions.Values)
+            DisplayTDAPosition(position);
         //Console.WriteLine();
     }
 
-    static void DisplayIBPosition(IBPosition position)
+    static void DisplayTDAPosition(TDAPosition position)
     {
         if (position.quantity == 0)
             return;
