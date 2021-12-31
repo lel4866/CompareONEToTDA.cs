@@ -1,0 +1,25 @@
+﻿This document was exported from the paperMoney® platform which provides a simulated trading environment. All data contained herein is for educational and entertainment purposes only. TD Ameritrade its subsidiaries and/or affiliates are not responsible for the accuracy of any of these exported data.
+
+Position Statement for D-16758452 (margin) on 12/29/21 11:49:04
+
+None
+Instrument,Qty,Days,Trade Price,Mark,Mrk Chng,P/L Open,P/L Day,BP Effect
+/MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
+"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
+SPX,,,,,,($330.00),($330.00),$0.00
+S&P 500 INDEX,0,,.00,4784.37,-1.98,$0.00,$0.00,
+100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
+100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
+100 (Weeklys) 31 MAY 22 4650 PUT,-3,153,176.10,179.90,N/A,"($1,140.00)","($1,140.00)",
+100 (Weeklys) 31 MAY 22 4730 PUT,+3,153,199.80,204.00,N/A,"$1,260.00","$1,260.00",
+100 (Weeklys) 31 MAY 22 4775 CALL,+2,153,223.10,214.40,N/A,"($1,740.00)","($1,740.00)",
+100 (Weeklys) 31 MAY 22 4800 CALL,-2,153,206.60,198.95,-4.70,"$1,530.00","$1,530.00",
+SPY,,,,,,$97.00,$97.00,"$23,828.00"
+SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
+100 18 JAN 22 477 PUT,+10,20,5.25,5.365,+.285,$115.00,$115.00,
+
+Cash & Sweep Vehicle,"$2,310.40"
+OVERALL P/L YTD,$60.75
+BP ADJUSTMENT,$0.00
+OVERNIGHT FUTURES BP,"$24,873.40"
+AVAILABLE DOLLARS,"$24,873.40"
