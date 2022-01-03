@@ -9,7 +9,6 @@ namespace CompareONEToTDA;
 
 internal static class CommandLine
 {
-
     const string VSDebugDir = @"C:\Users\lel48\VisualStudioProjects\CompareONEToTDA.cs\CompareONEToTDA\bin\Debug\net6.0";
     const string VSReleaseDir = @"C:\Users\lel48\VisualStudioProjects\CompareONEToTDA.cs\CompareONEToTDA\bin\Release\net6.0";
     const string VSProjectDir = @"C:\Users\lel48\VisualStudioProjects\CompareONEToTDA.cs";
@@ -71,12 +70,12 @@ internal static class CommandLine
                         arg_name = "tdadir";
                         if (td_specified)
                         {
-                            Console.WriteLine("***Command Line Error*** IB directory can only be specified once");
+                            Console.WriteLine("***Command Line Error*** TDA directory can only be specified once");
                             exit = true;
                         }
                         if (tf_specified)
                         {
-                            Console.WriteLine("***Command Line Error*** You cannot specify both IB file and IB directory");
+                            Console.WriteLine("***Command Line Error*** You cannot specify both TDA file and TDA directory");
                             exit = true;
                         }
                         td_specified = true;
