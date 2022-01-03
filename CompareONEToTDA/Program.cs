@@ -151,8 +151,20 @@ public class OptionKey : IComparable<OptionKey>
     }
 }
 
-//Financial Instrument Description, Position, Currency, Market Price, Market Value, Average Price, Unrealized P&L, Realized P&L, Liquidate Last, Security Type, Delta Dollars
-//SPX APR2022 4300 P [SPXW  220429P04300000 100],2,USD,119.5072021,23901.44,123.5542635,-809.41,0.00,No,OPT,-246454.66
+//Position Statement for D-16758452 (margin) on 12/29/21 11:49:04
+//
+//None
+//Instrument, Qty, Days, Trade Price,Mark,Mrk Chng, P/L Open, P/L Day, BP Effect
+///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
+//"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
+//SPX,,,,,,($330.00),($330.00),$0.00
+//S&P 500 INDEX,0,,.00,4784.37,-1.98,$0.00,$0.00,
+//100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
+//100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
+//100 (Weeklys) 31 MAY 22 4650 PUT,-3,153,176.10,179.90,N/A,"($1,140.00)","($1,140.00)",
+//SPY,,,,,,$97.00,$97.00,"$23,828.00"
+//SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
+//100 18 JAN 22 477 PUT,+10,20,5.25,5.365,+.285,$115.00,$115.00,
 class TDAPosition
 {
     public OptionType optionType; // just Put, Call, or Stock...futures are converted to equivalent SPX stock...so is SPY
@@ -160,10 +172,8 @@ class TDAPosition
     public int strike = 0;
     public DateOnly expiration = new();
     public int quantity;
-    //public float averagePrice; // average entry price
-    //public float marketPrice; // current market price
-    //public float unrealizedPnL;
-    //public float realizedPnL;
+    //public float tradePrice; // average entry price
+    //public float mark; // current market price
 
     // used only during reconciliation with ONE positions
     public int one_quantity = 0;
@@ -172,12 +182,12 @@ class TDAPosition
 
 static class Program
 {
-    internal const string version = "0.0.3";
+    internal const string version = "0.0.2";
     internal const string version_date = "2021-12-27";
     internal static string? tda_filename = null;
-    internal static string tda_directory = @"C:\Users\lel48\OneDrive\Documents\TDAExport\";
+    internal static string tda_directory = "";
     internal static string? one_filename = null;
-    internal static string one_directory = @"C:\Users\lel48\OneDrive\Documents\ONEExport\";
+    internal static string one_directory = "";
     internal static string master_symbol = "SPX";
     internal static string one_account = "";
 
@@ -215,6 +225,7 @@ static class Program
 
         // calls System.Environment.Exit(-1) if bad command line arguments
         CommandLine.ProcessCommandLineArguments(args);
+        master_symbol = master_symbol.ToUpper();
         Console.WriteLine($"CompareONEToTDA Version {version}, {version_date}. Processing trades for {master_symbol}");
 
         if (one_filename == null)
@@ -327,12 +338,15 @@ static class Program
         return latest_full_filename;
     }
 
-    //Portfolio
-    //Financial Instrument Description, Position, Currency, Market Price, Market Value, Average Price, Unrealized P&L, Realized P&L, Liquidate Last, Security Type, Delta Dollars
-    //SPX APR2022 4300 P [SPXW  220429P04300000 100],2,USD,119.5072021,23901.44,123.5542635,-809.41,0.00,No,OPT,-246454.66
+    //Position Statement for D-16758452 (margin) on 12/29/21 11:49:04
+    //
+    //None
+    //Instrument,Qty,Days,Trade Price, Mark, Mrk Chng,P/L Open, P/L Day, BP Effect
+    ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
+    //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
     static bool ProcessTDAFile(string full_filename)
     {
-        const string simulated_position_header = "This document was exported from the paperMoney";
+        const string simulated_position_header = "This document was exported from the paperMoney® platform";
 
         List<string> lines = ReadAllNonBlankLines(full_filename);        
         if (lines.Count < 5)
@@ -381,7 +395,7 @@ static class Program
             index_of_last_required_column = Math.Max(colnum, index_of_last_required_column);
         }
 
-        // now process each TDA position line
+        // now process each TDA position
         while (line_index  < lines.Count)
         {
             line = lines[line_index++];
@@ -389,8 +403,9 @@ static class Program
             if (!rc)
                 return false;
 
-            // blank line terminates list of positions. Next line must be "Cash Balances"
-            if (fields.Count == 0)
+            // blank line terminates list of positions.
+            // Next line must be: Cash & Sweep Vehicle,"$2,310.40"
+            if (fields[0] == "Cash & Sweep Vehicle")
                 break;
 
             if (fields.Count < index_of_last_required_column + 1)
@@ -399,14 +414,32 @@ static class Program
                 return false;
             }
 
-            int irc = ParseTDAPositionLine(line_index, fields);
-            if (irc != 0)
+            // parse a new position...this may consist of several lines. Examples:
+            ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
+            //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
+            //SPX,,,,,,($330.00),($330.00),$0.00
+            //S&P 500 INDEX,0,,.00,4784.37,-1.98,$0.00,$0.00,
+            //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
+            //100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
+            //SPY,,,,,,$97.00,$97.00,"$23,828.00"
+            //SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
+
+            TDAPosition tdaPosition = new();
+
+            int quantity_col = tda_columns["Qty"];
+            rc = int.TryParse(fields[quantity_col], out tdaPosition.quantity);
+            if (!rc)
             {
-                // if irc == -1, error parsing line
-                if (irc < 0)
-                    return false;
-                // irc +1, irrelevant symbol - ignore line
+                Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid quantity: {fields[quantity_col]}");
+                return false;
             }
+
+            int instrument_col = tda_columns["Instrument"];
+            string instrument = fields[instrument_col];
+
+            string security_type = "STK";
+            if (instrument.StartsWith('/'))
+                security_type = "FUT";
         }
 
         return true;
@@ -429,13 +462,17 @@ static class Program
         return lines;
     }
 
-    //Financial Instrument Description, Position, Currency, Market Price, Market Value, Average Price, Unrealized P&L, Realized P&L, Liquidate Last, Security Type, Delta Dollars
-    //SPX APR2022 4300 P [SPXW  220429P04300000 100],2,USD,119.5072021,23901.44,123.5542635,-809.41,0.00,No,OPT,-246454.66
-    //SPY,100,USD,463.3319397,46333.19,463.02,31.19,0.00,No,STK,46333.19
-    //MES MAR2022,1, USD,4624.50,23122.50,4625.604,-5.52,0.00, No, FUT,23136.14
+    ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
+    //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
+    //SPX,,,,,,($330.00),($330.00),$0.00
+    //S&P 500 INDEX,0,,.00,4784.37,-1.98,$0.00,$0.00,
+    //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
+    //100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
+    //SPY,,,,,,$97.00,$97.00,"$23,828.00"
+    //SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
 
     // returns 0 if line was parsed successfully, -1 if there was an error, 1 if line parsed ok, but is for symbol not relevant to this analysis
-    static int ParseTDAPositionLine(int line_index, List<string> fields)
+    static int ParseTDAPosition(int line_index, List<string> fields)
     {
         TDAPosition tdaPosition = new();
 
@@ -450,8 +487,10 @@ static class Program
         int instrument_col = tda_columns["Instrument"];
         string instrument = fields[instrument_col];
 
-        int security_type_col = tda_columns["Security Type"];
-        string security_type = fields[security_type_col].Trim();
+        string security_type = "STK";
+        if (instrument.StartsWith('/'))
+            security_type = "FUT";
+
         switch (security_type)
         {
             case "OPT":
@@ -465,7 +504,8 @@ static class Program
                 break;
 
             case "FUT":
-                //MES      MAR2022,1,USD,4624.50,23122.50,4625.604,-5.52,0.00,No,FUT,23136.14
+                ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
+                //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
                 tdaPosition.optionType = OptionType.Futures;
                 rc = ParseFuturesSpec(instrument, @"(\w+) +(\w+)$", out tdaPosition.symbol, out tdaPosition.expiration);
                 break;
