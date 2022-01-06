@@ -9,6 +9,10 @@ namespace CompareONEToTDA;
 
 internal static class CommandLine
 {
+    const string VSDebugDir = @"C:\Users\lel48\VisualStudioProjects\CompareONEToTDA.cs\CompareONEToIB\bin\Debug\net6.0";
+    const string VSReleaseDir = @"C:\Users\lel48\VisualStudioProjects\CompareONEToTDA.cs\CompareONEToIB\bin\Release\net6.0";
+    const string VSProjectDir = @"C:\Users\lel48\VisualStudioProjects\CompareONEToTDA.cs";
+
     internal static void ProcessCommandLineArguments(string[] args)
     {
         string? arg_name = null;
@@ -205,20 +209,40 @@ internal static class CommandLine
 
         if (!symbol_specified)
         {
-            Console.WriteLine("***Command Line Error*** No symbol (--symbol) specified");
-            exit = true;
+            // default is spx
+            Program.master_symbol = "SPX";
         }
 
         if (!td_specified && !tf_specified)
         {
-            Console.WriteLine("***Command Line Error*** No TDA file or directory (--ibdir) specified");
-            exit = true;
+            // check if default TDA directory exists; default name and location is cwd/TDAExport/
+            string curdir = Directory.GetCurrentDirectory();
+            if (curdir == VSDebugDir || curdir == VSReleaseDir)
+                curdir = VSProjectDir;
+            curdir = Path.GetFullPath(curdir + "/TDAExport/"); // use GetFullPath to get "normalized" directory path
+            if (Directory.Exists(curdir))
+                Program.tda_directory = curdir;
+            else
+            {
+                Console.WriteLine("***Command Line Error*** No TDA file (--tdafile) or directory (--tdadir) specified, and default directory (cwd/TDAExport) doesn't exist");
+                exit = true;
+            }
         }
 
         if (!od_specified && !of_specified)
         {
-            Console.WriteLine("***Command Line Error*** No ONE file or directory (--onedir) specified");
-            exit = true;
+            // check if default ONE directory exists; default name and location is cwd/ONEExport/
+            string curdir = Directory.GetCurrentDirectory();
+            if (curdir == VSDebugDir || curdir == VSReleaseDir)
+                curdir = VSProjectDir;
+            curdir = Path.GetFullPath(curdir + "/ONEExport/"); // use GetFullPath to get "normalized" directory path
+            if (Directory.Exists(curdir))
+                Program.one_directory = curdir;
+            else
+            {
+                Console.WriteLine("***Command Line Error*** No ONE file (--onefile) or directory (--onedir) specified, and default directory (cwd/ONEExport) doesn't exist");
+                exit = true;
+            }
         }
 
         if (exit)

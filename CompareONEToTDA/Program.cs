@@ -160,10 +160,6 @@ class TDAPosition
     public int strike = 0;
     public DateOnly expiration = new();
     public int quantity;
-    //public float averagePrice; // average entry price
-    //public float marketPrice; // current market price
-    //public float unrealizedPnL;
-    //public float realizedPnL;
 
     // used only during reconciliation with ONE positions
     public int one_quantity = 0;
@@ -173,7 +169,7 @@ class TDAPosition
 static class Program
 {
     internal const string version = "0.0.3";
-    internal const string version_date = "2021-12-27";
+    internal const string version_date = "2022-012-06";
     internal static string? tda_filename = null;
     internal static string tda_directory = @"C:\Users\lel48\OneDrive\Documents\TDAExport\";
     internal static string? one_filename = null;
@@ -233,6 +229,7 @@ static class Program
 
         // display ONE positions
         DisplayONEPositions();
+
         rc = ProcessTDAFile(tda_filename);
         if (!rc)
             return -1;
@@ -243,6 +240,8 @@ static class Program
         rc = CompareONEPositionsToTDAPositions();
         if (!rc)
             return -1;
+
+        Console.WriteLine($"\nSuccess: TDA and ONE positions for {master_symbol} are equivalent.");
 
         stopWatch.Stop();
         Console.WriteLine($"\nElapsed time = {stopWatch.Elapsed}");
@@ -278,7 +277,7 @@ static class Program
 
         if (!file_found)
         {
-            Console.WriteLine("\n***Error*** No valid ONE files found");
+            Console.WriteLine($"\n***Error*** No ONE files found in {one_directory} with following filename pattern: yyyy-mm-dd-ONEDetailReport.csv");
             return null;
         }
 
@@ -300,8 +299,9 @@ static class Program
         foreach (string full_filename in files)
         {
             string filename = Path.GetFileName(full_filename);
-            string datestr = filename[..10];
-
+            if (filename.Length < filename_pattern.Length)
+                continue;
+            string datestr = filename[..10]; // yyyy-mm-dd
             if (!int.TryParse(datestr[..4], out int year))
                 continue;
             if (!int.TryParse(datestr.AsSpan(5, 2), out int month))
@@ -320,7 +320,7 @@ static class Program
 
         if (!file_found)
         {
-            Console.WriteLine("\n***Error*** No TDA Position files found with following filename pattern: yyyy-mm--ddPositionStatement.csv");
+            Console.WriteLine($"\n***Error*** No TDA Position files found in {tda_directory} with following filename pattern: yyyy-mm--ddPositionStatement.csv");
             return null;
         }
 
@@ -395,7 +395,7 @@ static class Program
 
             if (fields.Count < index_of_last_required_column + 1)
             {
-                Console.WriteLine($"\n***Error*** TDA position line #{line_index + 1} must have {index_of_last_required_column + 1} fields, not {fields.Count} fields");
+                Console.WriteLine($"\n***Error*** TDA position line {line_index + 1} must have {index_of_last_required_column + 1} fields, not {fields.Count} fields");
                 return false;
             }
 
@@ -684,7 +684,7 @@ static class Program
 
                 if (fields.Count < index_of_last_required_trade_column + 1)
                 {
-                    Console.WriteLine($"\n***Error*** ONE Trade line #{line_index + 1} must have at least {index_of_last_required_trade_column + 1} fields, not {fields.Count} fields");
+                    Console.WriteLine($"\n***Error*** ONE Trade line {line_index + 1} must have at least {index_of_last_required_trade_column + 1} fields, not {fields.Count} fields");
                     return false;
                 }
 
@@ -700,13 +700,13 @@ static class Program
             // this is position line
             if (curOneTrade == null)
             {
-                Console.WriteLine($"\n***Error*** ONE Position line #{line_index + 1} comes before Trade line.");
+                Console.WriteLine($"\n***Error*** ONE Position line {line_index + 1} comes before Trade line.");
                 return false;
             }
 
             if (fields.Count < index_of_last_required_position_column + 1)
             {
-                Console.WriteLine($"\n***Error*** ONE Trade line #{line_index + 1} must have at least {index_of_last_required_position_column + 1} fields, not {fields.Count} fields");
+                Console.WriteLine($"\n***Error*** ONE Trade line {line_index + 1} must have at least {index_of_last_required_position_column + 1} fields, not {fields.Count} fields");
                 return false;
             }
 
@@ -731,6 +731,12 @@ static class Program
                 Debug.Assert(position.quantity != 0); // todo: should be error message
                 curOneTrade.positions.Add(key, position.quantity);
             }
+        }
+
+        if (ONE_trades.Count == 0)
+        {
+            Console.WriteLine($"\n***Error*** No trades in ONE file {full_filename}");
+            return false;
         }
 
         DisplayONETrades();
