@@ -450,7 +450,7 @@ static class Program
     static List<string> ReadAllNonBlankLines(string filename)
     {
         List<string> lines = new();
-        using StreamReader reader = new StreamReader(filename);
+        using var reader = new StreamReader(filename);
         while (true) 
         {
             string? line = reader.ReadLine();
