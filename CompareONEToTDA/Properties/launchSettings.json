@@ -1,8 +1,12 @@
 {
   "profiles": {
     "CompareONEToTDA": {
+<<<<<<< HEAD
       "commandName": "Project",
       "commandLineArgs": "-tf C:\\Users\\lel48\\OneDrive\\Documents\\TDAExport\\2021-12-29-PositionStatement.csv -od C:\\Users\\lel48\\OneDrive\\Documents\\ONEExport "
+=======
+      "commandName": "Project"
+>>>>>>> 9bb1fdea25307fe5d7744e139389be70174f8e62
     }
   }
 }

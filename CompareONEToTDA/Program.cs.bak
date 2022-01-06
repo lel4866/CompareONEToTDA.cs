@@ -172,6 +172,11 @@ class TDAPosition
     public int strike = 0;
     public DateOnly expiration = new();
     public int quantity;
+<<<<<<< HEAD
+=======
+    //public float tradePrice; // average entry price
+    //public float mark; // current market price
+>>>>>>> 9bb1fdea25307fe5d7744e139389be70174f8e62
 
     // used only during reconciliation with ONE positions
     public int one_quantity = 0;
@@ -180,8 +185,13 @@ class TDAPosition
 
 static class Program
 {
+<<<<<<< HEAD
     internal const string version = "0.0.3";
-    internal const string version_date = "2022-01-06";
+    internal const string version_date = "2022-012-06";
+=======
+    internal const string version = "0.0.2";
+    internal const string version_date = "2021-12-27";
+>>>>>>> 9bb1fdea25307fe5d7744e139389be70174f8e62
     internal static string? tda_filename = null;
     internal static string tda_directory = "";
     internal static string? one_filename = null;
