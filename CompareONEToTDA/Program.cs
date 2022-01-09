@@ -216,8 +216,26 @@ static class Program
     // consolidated ONE positions; key is (symbol, OptionType, Expiration, Strike); value is (quantity, HashSet<string>); string is trade id 
     static readonly SortedDictionary<OptionKey, (int, HashSet<string>)> consolidatedOnePositions = new();
 
+    static void RunUnitTests()
+    {
+        // tests for ParseCSVLine
+        bool ParseCSVLineRC = ParseCSVLine(",", out List<string> parseCSVTestFields);
+        Debug.Assert(ParseCSVLineRC && parseCSVTestFields.Count == 1 && parseCSVTestFields[0] == "");
+        parseCSVTestFields.Clear();
+        ParseCSVLineRC = ParseCSVLine(",,", out parseCSVTestFields); // trailing comma ignored
+        Debug.Assert(ParseCSVLineRC && parseCSVTestFields.Count == 2 && parseCSVTestFields[0] == "" && parseCSVTestFields[1] == "");
+        parseCSVTestFields.Clear();
+        ParseCSVLineRC = ParseCSVLine("1,", out parseCSVTestFields); // trailing comma ignored
+        Debug.Assert(ParseCSVLineRC && parseCSVTestFields.Count == 1 && parseCSVTestFields[0] == "1");
+        //int test1 = 1;
+    }
+
     static int Main(string[] args)
     {
+#if true
+        RunUnitTests();
+#endif
+
         var stopWatch = new Stopwatch();
         stopWatch.Start();
 
@@ -350,7 +368,7 @@ static class Program
     {
         const string simulated_position_header = "This document was exported from the paperMoney® platform";
 
-        List<string> lines = ReadAllNonBlankLines(full_filename);        
+        List<string> lines = ReadAllNonBlankLines(full_filename); // throws away all lines from "Cash & Sweep Vehicle" to end       
         if (lines.Count < 5)
         {
             Console.WriteLine("\n***Error*** TDA File must contain at least 5 non-blank lines");
@@ -403,45 +421,84 @@ static class Program
             line = lines[line_index++];
             bool rc = ParseCSVLine(line, out List<string> fields);
             if (!rc)
-                return false;
-
-            // blank line terminates list of positions.
-            // Next line must be: Cash & Sweep Vehicle,"$2,310.40"
-            if (fields[0] == "Cash & Sweep Vehicle")
-                break;
-
-            if (fields.Count < index_of_last_required_column + 1)
             {
-                Console.WriteLine($"\n***Error*** TDA position line {line_index + 1} must have {index_of_last_required_column + 1} fields, not {fields.Count} fields");
+                Console.WriteLine($"\n***Error*** In TDA file, line {line_index + 1} is not a valid comma separated line: {line}");
                 return false;
             }
 
-            // parse a new position...this may consist of several lines. Examples:
+            if (fields.Count < index_of_last_required_column + 1)
+            {
+                Console.WriteLine($"\n***Error*** In TDA file, at line {line_index + 1}, first line of TDA position must have {index_of_last_required_column + 1} fields, not {fields.Count} fields: {line}");
+                return false;
+            }
+
+            if (line_index == lines.Count)
+            {
+                Console.WriteLine($"\n***Error*** In TDA file, at line {line_index + 1}, each TDA position must consist of at least 2 lines in file, not just 1: {line}");
+                return false;
+            }
+
+            // parse a new position
+            // each position may consist of several lines, but at least 2.
+            // the first line is: Instrument,Qty,Days,Trade Price, Mark, Mrk Chng,P/L Open, P/L Day, BP Effect 
+            // We only use the first field...Instrument to determine instrument type. All other info comes from the second line forward
+            // Examples:
+
             ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
             //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
+
             //SPX,,,,,,($330.00),($330.00),$0.00
             //S&P 500 INDEX,0,,.00,4784.37,-1.98,$0.00,$0.00,
             //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
             //100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
+
             //SPY,,,,,,$97.00,$97.00,"$23,828.00"
             //SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
 
             TDAPosition tdaPosition = new();
 
-            int quantity_col = tda_columns["Qty"];
-            rc = int.TryParse(fields[quantity_col], out tdaPosition.quantity);
+            int instrument_col = tda_columns["Instrument"];
+            string symbol = fields[instrument_col];
+
+            string line2 = lines[line_index++];
+            rc = ParseCSVLine(line2, out List<string> fields2);
             if (!rc)
             {
-                Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid quantity: {fields[quantity_col]}");
+                Console.WriteLine($"\n***Error*** In TDA file, line {line_index + 1} is not a valid comma separated line: {line}");
                 return false;
             }
 
-            int instrument_col = tda_columns["Instrument"];
-            string instrument = fields[instrument_col];
+            // get quantity from second line
+            int quantity_col = tda_columns["Qty"];
+            rc = int.TryParse(fields2[quantity_col], out tdaPosition.quantity);
+            if (!rc)
+            {
+                Console.WriteLine($"***Error*** In TDA file, in line {line_index + 1}: invalid quantity: {fields2[quantity_col]}");
+                return false;
+            }
 
-            string security_type = "STK";
-            if (instrument.StartsWith('/'))
+            string security_type;
+            if (symbol.StartsWith('/'))
+            {
                 security_type = "FUT";
+                if (tdaPosition.quantity <= 0)
+                {
+                    Console.WriteLine($"***Error*** In TDA file, in line {line_index + 1}: futures quantity must be greater than 0");
+                    return false;
+                }
+            }
+            else if (symbol == master_symbol)
+            {
+                security_type = "OPT";
+            }
+            else if (associated_symbols[master_symbol].ContainsKey(symbol))
+            {
+                security_type = "STK";
+            }
+            else
+            {
+                // ignore stock and any following options
+            }
         }
 
         return true;
@@ -459,6 +516,8 @@ static class Program
             line = line.Trim();
             if (line.Length == 0)
                 continue;
+            if (line == "Cash & Sweep Vehicle")
+                break;
             lines.Add(line);
         }
         return lines;
@@ -1188,12 +1247,16 @@ static class Program
     const char delimiter = ',';
     static bool ParseCSVLine(string line, out List<string> fields)
     {
+        Debug.Assert(line.Length > 0);
+
         fields = new();
         int state = 0;
         int start = 0;
-        char c;
+        char c = '\0';
+        char prevc = '\0';
         for (int i = 0; i < line.Length; i++)
         {
+            prevc = c;
             c = line[i];
             switch (state)
             {
@@ -1250,11 +1313,11 @@ static class Program
             }
 
         }
+
         // process last field
         switch (state)
         {
-            case 0: // must be blank line
-                Debug.Assert(line.Length == 0);
+            case 0:
                 break;
 
             case 1: // field started with non-quote...standard end
