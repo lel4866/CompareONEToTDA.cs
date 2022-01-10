@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace CompareONEToTDA;
 
 // todo: rename OptionType to SecurityType
-public enum OptionType
+public enum SecurityType
 {
     Put,
     Call,
@@ -45,7 +45,7 @@ class ONEPosition
 {
     public string account = "";
     public string trade_id = "";
-    public OptionType optionType;
+    public SecurityType optionType;
     public DateTime open_dt;
     public string symbol = ""; // SPX, SPXW, etc
     public int strike;
@@ -59,11 +59,11 @@ class ONEPosition
 public class OptionKey : IComparable<OptionKey>
 {
     public string Symbol { get; set; }
-    public OptionType OptionType { get; set; }
+    public SecurityType OptionType { get; set; }
     public DateOnly Expiration { get; set; }
     public int Strike { get; set; }
 
-    public OptionKey(string symbol, OptionType optionType, DateOnly expiration, int strike)
+    public OptionKey(string symbol, SecurityType optionType, DateOnly expiration, int strike)
     {
         this.Symbol = symbol;
         this.OptionType = optionType;
@@ -91,8 +91,8 @@ public class OptionKey : IComparable<OptionKey>
         if (other == null)
             return 1;
 
-        bool thisIsOption = OptionType == OptionType.Put || OptionType == OptionType.Call;
-        bool otherIsOption = other.OptionType == OptionType.Put || other.OptionType == OptionType.Call;
+        bool thisIsOption = OptionType == SecurityType.Put || OptionType == SecurityType.Call;
+        bool otherIsOption = other.OptionType == SecurityType.Put || other.OptionType == SecurityType.Call;
         if (!thisIsOption)
         {
             // this is stock/future
@@ -102,9 +102,9 @@ public class OptionKey : IComparable<OptionKey>
 
             // this and other are both Stocks/Futures: stocks come before futures, then symbol, then, if future, expiration
 
-            if (OptionType == OptionType.Stock)
+            if (OptionType == SecurityType.Stock)
             {
-                if (other.OptionType == OptionType.Futures)
+                if (other.OptionType == SecurityType.Futures)
                     return -1; // stocks come before futures
 
                 // this and other are both stocks...sort by symbol
@@ -113,7 +113,7 @@ public class OptionKey : IComparable<OptionKey>
 
             // this is futures
 
-            if (other.OptionType == OptionType.Stock)
+            if (other.OptionType == SecurityType.Stock)
                 return 1; // this is futures, other is stock: futures come after stocks
 
             // this and other are both futures..sort by symbol then expiration
@@ -167,7 +167,7 @@ public class OptionKey : IComparable<OptionKey>
 //100 18 JAN 22 477 PUT,+10,20,5.25,5.365,+.285,$115.00,$115.00,
 class TDAPosition
 {
-    public OptionType optionType; // just Put, Call, or Stock...futures are converted to equivalent SPX stock...so is SPY
+    public SecurityType securityType; // just Put, Call, or Stock...futures are converted to equivalent SPX stock...so is SPY
     public string symbol = ""; // SPX, SPXW, etc
     public int strike = 0;
     public DateOnly expiration = new();
@@ -200,6 +200,7 @@ static class Program
         { "RUT", new Dictionary<string, float> { { "IWM", 0.1f }, { "M2K", 5f }, { "RTY", 50f } } },
         { "NDX", new Dictionary<string, float> { { "QQQ", 0.1f }, { "MNQ", 5f }, { "NQ", 50f } } }
     };
+    internal static Dictionary<string, float> relevant_symbols; // set to: associated_symbols[master_symbol];
 
     // note: the ref is readonly, not the contents of the Dictionary
     static readonly Dictionary<string, int> tda_columns = new(); // key is column name, value is column index
@@ -209,6 +210,9 @@ static class Program
 
     // key is (symbol, OptionType, Expiration, Strike); value is quantity
     static readonly SortedDictionary<OptionKey, TDAPosition> tdaPositions = new();
+
+    // these positions are not relevant to specified master_symbol, but we want to display them so user can verify
+    static readonly SortedDictionary<OptionKey, TDAPosition> irrelevantTDAPositions = new();
 
     // dictionry of ONE trades with key of trade id
     static readonly SortedDictionary<string, ONETrade> ONE_trades = new();
@@ -242,6 +246,7 @@ static class Program
         // calls System.Environment.Exit(-1) if bad command line arguments
         CommandLine.ProcessCommandLineArguments(args);
         master_symbol = master_symbol.ToUpper();
+        relevant_symbols = associated_symbols[master_symbol];
         Console.WriteLine($"CompareONEToTDA Version {version}, {version_date}. Processing trades for {master_symbol}");
 
         if (one_filename == null)
@@ -267,6 +272,9 @@ static class Program
 
         // display TDA positions
         DisplayTDAPositions();
+
+        if (irrelevantTDAPositions.Count > 0)
+            DisplayIrrelevantTDAPositions();
 
         rc = CompareONEPositionsToTDAPositions();
         if (!rc)
@@ -473,11 +481,12 @@ static class Program
             rc = int.TryParse(fields2[quantity_col], out tdaPosition.quantity);
             if (!rc)
             {
-                Console.WriteLine($"***Error*** In TDA file, in line {line_index + 1}: invalid quantity: {fields2[quantity_col]}");
+                Console.WriteLine($"***Error*** In TDA file, in line {line_index + 1}: invalid Qty: {fields2[quantity_col]}");
                 return false;
             }
 
             string security_type;
+            bool irrelevant_position = false;
             if (symbol.StartsWith('/'))
             {
                 security_type = "FUT";
@@ -498,7 +507,40 @@ static class Program
             else
             {
                 // ignore stock and any following options
+                irrelevant_position = true;
             }
+
+            var tda_key = new OptionKey(tdaPosition.symbol, tdaPosition.securityType, tdaPosition.expiration, tdaPosition.strike);
+            if (irrelevant_position && !irrelevantTDAPositions.ContainsKey(tda_key))
+            {
+                irrelevantTDAPositions.Add(tda_key, tdaPosition);
+                continue;
+            }
+
+            if (tdaPositions.ContainsKey(tda_key))
+            {
+                if (tdaPosition.securityType == SecurityType.Put || tdaPosition.securityType == SecurityType.Call)
+                {
+                    Console.WriteLine($"***Error*** in TDA line {line_index + 1}: duplicate expiration/strike ({tdaPosition.symbol} {tdaPosition.securityType} {tdaPosition.expiration},{tdaPosition.strike})");
+                    return false;
+                }
+                else
+                {
+                    if (tdaPosition.securityType == SecurityType.Futures)
+                        Console.WriteLine($"***Error*** in TDA line {line_index + 1}: duplicate futures entry ({tdaPosition.symbol} {tdaPosition.expiration})");
+                    else
+                        Console.WriteLine($"***Error*** in TDA line {line_index + 1}: duplicate stock entry ({tdaPosition.symbol})");
+                    return false;
+                }
+            }
+
+            tdaPositions.Add(tda_key, tdaPosition);
+        }
+
+        if (tdaPositions.Count == 0)
+        {
+            Console.WriteLine($"\n***Error*** No positions related to {master_symbol} in TDA file {full_filename}");
+            return false;
         }
 
         return true;
@@ -555,7 +597,7 @@ static class Program
         switch (security_type)
         {
             case "OPT":
-                rc = ParseOptionSpec(instrument, @".*\[(\w+) +(.+) \w+\]$", out tdaPosition.symbol, out tdaPosition.optionType, out tdaPosition.expiration, out tdaPosition.strike);
+                rc = ParseOptionSpec(instrument, @".*\[(\w+) +(.+) \w+\]$", out tdaPosition.symbol, out tdaPosition.securityType, out tdaPosition.expiration, out tdaPosition.strike);
                 if (!rc)
                 {
                     Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: invalid option specification: {fields[instrument_col]}");
@@ -567,28 +609,28 @@ static class Program
             case "FUT":
                 ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
                 //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
-                tdaPosition.optionType = OptionType.Futures;
+                tdaPosition.securityType = SecurityType.Futures;
                 rc = ParseFuturesSpec(instrument, @"(\w+) +(\w+)$", out tdaPosition.symbol, out tdaPosition.expiration);
                 break;
 
             case "STK":
                 //SPY,100,USD,463.3319397,46333.19,463.02,31.19,0.00,No,STK,46333.19
-                tdaPosition.optionType = OptionType.Stock;
+                tdaPosition.securityType = SecurityType.Stock;
                 tdaPosition.symbol = fields[0].Trim();
                 break;
         }
 
-        var tda_key = new OptionKey(tdaPosition.symbol, tdaPosition.optionType, tdaPosition.expiration, tdaPosition.strike);
+        var tda_key = new OptionKey(tdaPosition.symbol, tdaPosition.securityType, tdaPosition.expiration, tdaPosition.strike);
         if (tdaPositions.ContainsKey(tda_key))
         {
-            if (tdaPosition.optionType == OptionType.Put || tdaPosition.optionType == OptionType.Call)
+            if (tdaPosition.securityType == SecurityType.Put || tdaPosition.securityType == SecurityType.Call)
             {
-                Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: duplicate expiration/strike ({tdaPosition.symbol} {tdaPosition.optionType} {tdaPosition.expiration},{tdaPosition.strike})");
+                Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: duplicate expiration/strike ({tdaPosition.symbol} {tdaPosition.securityType} {tdaPosition.expiration},{tdaPosition.strike})");
                 return -1;
             }
             else
             {
-                if (tdaPosition.optionType == OptionType.Futures)
+                if (tdaPosition.securityType == SecurityType.Futures)
                     Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: duplicate futures entry ({tdaPosition.symbol} {tdaPosition.expiration})");
                 else
                     Console.WriteLine($"***Error*** in #{line_index + 1} in TDA file: duplicate stock entry ({tdaPosition.symbol})");
@@ -618,10 +660,10 @@ static class Program
     }
 
     // SPX APR2022 4300 P[SPXW  220429P04300000 100]
-    static bool ParseOptionSpec(string field, string regex, out string symbol, out OptionType type, out DateOnly expiration, out int strike)
+    static bool ParseOptionSpec(string field, string regex, out string symbol, out SecurityType type, out DateOnly expiration, out int strike)
     {
         symbol = "";
-        type = OptionType.Put;
+        type = SecurityType.Put;
         expiration = new();
         strike = 0;
 
@@ -638,7 +680,7 @@ static class Program
         int month = int.Parse(option_code[2..4]);
         int day = int.Parse(option_code[4..6]);
         expiration = new(year, month, day);
-        type = (option_code[6] == 'P') ? OptionType.Put : OptionType.Call;
+        type = (option_code[6] == 'P') ? SecurityType.Put : SecurityType.Call;
         strike = int.Parse(option_code[7..12]);
         return true;
     }
@@ -908,11 +950,11 @@ static class Program
             {
                 switch (key.OptionType)
                 {
-                    case OptionType.Stock:
+                    case SecurityType.Stock:
                         Console.WriteLine($"{master_symbol}\tIndex\tquantity: {quantity}");
                         break;
-                    case OptionType.Put:
-                    case OptionType.Call:
+                    case SecurityType.Put:
+                    case SecurityType.Call:
                         Console.WriteLine($"{key.Symbol}\t{key.OptionType}\tquantity: {quantity}\texpiration: {key.Expiration}\tstrike: {key.Strike}");
                         break;
                     default:
@@ -1104,7 +1146,7 @@ static class Program
         else if (type == "Stock")
         {
             position.symbol = symbol;
-            position.optionType = OptionType.Stock;
+            position.optionType = SecurityType.Stock;
             position.expiration = new DateOnly(1, 1, 1);
             position.strike = 0;
         }
@@ -1135,10 +1177,10 @@ static class Program
             if (one_quantity == 0)
                 continue;
 
-            Debug.Assert(one_key.OptionType != OptionType.Futures);
+            Debug.Assert(one_key.OptionType != SecurityType.Futures);
 
             // if ONE position is Stock ignore it...already checked in call to VerifyStockPositions();
-            if (one_key.OptionType == OptionType.Stock)
+            if (one_key.OptionType == SecurityType.Stock)
                 continue;
 
             if (!tdaPositions.TryGetValue(one_key, out TDAPosition? tda_position))
@@ -1169,14 +1211,14 @@ static class Program
         foreach (TDAPosition position in tdaPositions.Values)
         {
             // ignore stock/futures positions...they've already been checked in VerifyStockPositions()
-            if (position.optionType == OptionType.Stock || position.optionType == OptionType.Futures)
+            if (position.securityType == SecurityType.Stock || position.securityType == SecurityType.Futures)
                 continue;
 
             if (position.one_quantity != position.quantity)
             {
                 if (position.one_quantity == 0)
                 {
-                    Console.WriteLine($"\n***Error*** TDA has a {position.optionType} position with no matching position in ONE");
+                    Console.WriteLine($"\n***Error*** TDA has a {position.securityType} position with no matching position in ONE");
                     DisplayTDAPosition(position);
                     rc = false;
                 }
@@ -1191,7 +1233,7 @@ static class Program
     {
         // get ONE consolidated index position
         // note that net ONE index position could be 0 even if individual ONE trades have index positions
-        List<OptionKey> one_stock_keys = consolidatedOnePositions.Keys.Where(s => s.OptionType == OptionType.Stock).ToList();
+        List<OptionKey> one_stock_keys = consolidatedOnePositions.Keys.Where(s => s.OptionType == SecurityType.Stock).ToList();
         Debug.Assert(one_stock_keys.Count <= 1, "***Program Error*** VerifyStockPositions: more than 1 Index position in consolidatedOnePositions");
         (int one_quantity, HashSet<string> one_trade_ids) = (0, new());
         if (one_stock_keys.Count == 1)
@@ -1203,7 +1245,7 @@ static class Program
 
         // get TDA stock/futures positions
         // note that net TDA position could be 0 even if stock/futures positions exist in TDA
-        List<OptionKey> tda_stock_or_futures_keys = tdaPositions.Keys.Where(s => s.OptionType == OptionType.Stock || s.OptionType == OptionType.Futures).ToList();
+        List<OptionKey> tda_stock_or_futures_keys = tdaPositions.Keys.Where(s => s.OptionType == SecurityType.Stock || s.OptionType == SecurityType.Futures).ToList();
         float tda_stock_or_futures_quantity = 0f;
         foreach (OptionKey tda_stock_or_futures_key in tda_stock_or_futures_keys)
         {
@@ -1221,7 +1263,7 @@ static class Program
         // note that either position could be 0
         if (tda_stock_or_futures_quantity == 0)
         {
-            Debug.Assert(one_quantity > 0);
+            Debug.Assert(one_quantity != 0);
             Debug.Assert(one_trade_ids.Count > 0);
             Console.WriteLine($"\n***Error*** ONE has an index position in {master_symbol} of {one_quantity} shares, in trade(s) {string.Join(",", one_trade_ids)}, while TDA has no matching positions");
             return false;
@@ -1349,11 +1391,11 @@ static class Program
         {
             switch (one_key.OptionType)
             {
-                case OptionType.Stock:
+                case SecurityType.Stock:
                     Console.WriteLine($"{one_key.Symbol}\tIndex\tquantity: {quantity}\ttrade(s): {string.Join(",", trades)}");
                     break;
-                case OptionType.Call:
-                case OptionType.Put:
+                case SecurityType.Call:
+                case SecurityType.Put:
                     // create trades list
                     Console.WriteLine($"{one_key.Symbol}\t{one_key.OptionType}\tquantity: {quantity}\texpiration: {one_key.Expiration}\tstrike: {one_key.Strike}\ttrade(s): {string.Join(",", trades)}");
                     break;
@@ -1367,7 +1409,13 @@ static class Program
         Console.WriteLine($"TDA Positions related to {master_symbol}:");
         foreach (TDAPosition position in tdaPositions.Values)
             DisplayTDAPosition(position);
-        //Console.WriteLine();
+    }
+
+    static void DisplayIrrelevantTDAPositions()
+    {
+        Console.WriteLine($"\nTDA Positions **NOT** related to {master_symbol}:");
+        foreach (TDAPosition position in irrelevantTDAPositions.Values)
+            DisplayTDAPosition(position);
     }
 
     static void DisplayTDAPosition(TDAPosition position)
@@ -1375,20 +1423,20 @@ static class Program
         if (position.quantity == 0)
             return;
 
-        switch (position.optionType)
+        switch (position.securityType)
         {
-            case OptionType.Stock:
+            case SecurityType.Stock:
                 //Console.WriteLine($"{position.symbol} {position.optionType}: quantity = {position.quantity}");
-                Console.WriteLine($"{position.symbol}\t{position.optionType}\tquantity: {position.quantity}");
+                Console.WriteLine($"{position.symbol}\t{position.securityType}\tquantity: {position.quantity}");
                 break;
-            case OptionType.Futures:
+            case SecurityType.Futures:
                 //Console.WriteLine($"{position.symbol} {position.optionType}: expiration = {position.expiration}, quantity = {position.quantity}");
-                Console.WriteLine($"{position.symbol}\t{position.optionType}\tquantity: {position.quantity}\texpiration: {position.expiration}");
+                Console.WriteLine($"{position.symbol}\t{position.securityType}\tquantity: {position.quantity}\texpiration: {position.expiration}");
                 break;
-            case OptionType.Call:
-            case OptionType.Put:
+            case SecurityType.Call:
+            case SecurityType.Put:
                 //Console.WriteLine($"{position.symbol} {position.optionType}: expiration = {position.expiration}, strike = {position.strike}, quantity = {position.quantity}");
-                Console.WriteLine($"{position.symbol}\t{position.optionType}\tquantity: {position.quantity}\texpiration: {position.expiration}\tstrike: {position.strike}");
+                Console.WriteLine($"{position.symbol}\t{position.securityType}\tquantity: {position.quantity}\texpiration: {position.expiration}\tstrike: {position.strike}");
                 break;
         }
     }
