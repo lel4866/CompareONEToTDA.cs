@@ -446,10 +446,9 @@ static class Program
                 return false;
             }
 
-            // parse a new position
-            // each position may consist of several lines, but at least 2.
+            // parse a new position - each position contains 2 or more lines
             // the first line is: Instrument,Qty,Days,Trade Price, Mark, Mrk Chng,P/L Open, P/L Day, BP Effect 
-            // We only use the first field...Instrument to determine instrument type. All other info comes from the second line forward
+            // We only use the first field...Instrument to determine instrument type. All other info comes from the second line
             // Examples:
 
             ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
@@ -465,8 +464,9 @@ static class Program
 
             TDAPosition tdaPosition = new();
 
+            // get symbol from first line
             int instrument_col = tda_columns["Instrument"];
-            string symbol = fields[instrument_col];
+            tdaPosition.symbol = fields[instrument_col];
 
             string line2 = lines[line_index++];
             rc = ParseCSVLine(line2, out List<string> fields2);
@@ -481,26 +481,21 @@ static class Program
             rc = int.TryParse(fields2[quantity_col], out tdaPosition.quantity);
             if (!rc)
             {
-                Console.WriteLine($"***Error*** In TDA file, in line {line_index + 1}: invalid Qty: {fields2[quantity_col]}");
+                Console.WriteLine($"***Error*** In TDA file, in line {line_index + 1}: invalid Quantity: {fields2[quantity_col]}");
                 return false;
             }
 
             string security_type;
             bool irrelevant_position = false;
-            if (symbol.StartsWith('/'))
+            if (tdaPosition.symbol.StartsWith('/'))
             {
                 security_type = "FUT";
-                if (tdaPosition.quantity <= 0)
-                {
-                    Console.WriteLine($"***Error*** In TDA file, in line {line_index + 1}: futures quantity must be greater than 0");
-                    return false;
-                }
             }
-            else if (symbol == master_symbol)
+            else if (tdaPosition.symbol == master_symbol)
             {
                 security_type = "OPT";
             }
-            else if (associated_symbols[master_symbol].ContainsKey(symbol))
+            else if (associated_symbols[master_symbol].ContainsKey(tdaPosition.symbol))
             {
                 security_type = "STK";
             }
@@ -509,11 +504,12 @@ static class Program
                 // ignore stock and any following options
                 irrelevant_position = true;
             }
-
             var tda_key = new OptionKey(tdaPosition.symbol, tdaPosition.securityType, tdaPosition.expiration, tdaPosition.strike);
-            if (irrelevant_position && !irrelevantTDAPositions.ContainsKey(tda_key))
+
+            if (irrelevant_position)
             {
-                irrelevantTDAPositions.Add(tda_key, tdaPosition);
+                if (!irrelevantTDAPositions.ContainsKey(tda_key))
+                    irrelevantTDAPositions.Add(tda_key, tdaPosition);
                 continue;
             }
 
