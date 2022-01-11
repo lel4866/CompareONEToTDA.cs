@@ -472,22 +472,44 @@ static class Program
             rc = ParseCSVLine(line2, out List<string> fields2);
             if (!rc)
             {
-                Console.WriteLine($"\n***Error*** In TDA file, line {line_index + 1} is not a valid comma separated line: {line}");
+                Console.WriteLine($"\n***Error*** In TDA file, line {line_index} is not a valid comma separated line: {line}");
                 return false;
             }
 
-            // get quantity from second line
+            // get quantity from second line because for index and stocks, quantity in first line is 0
             int quantity_col = tda_columns["Qty"];
             rc = int.TryParse(fields2[quantity_col], out tdaPosition.quantity);
             if (!rc)
             {
-                Console.WriteLine($"***Error*** In TDA file, in line {line_index + 1}: invalid Qty: {fields2[quantity_col]}");
+                Console.WriteLine($"***Error*** In TDA file, in line {line_index}: invalid Qty: {fields2[quantity_col]}");
                 return false;
             }
 
             string security_type;
             bool irrelevant_position = false;
-            if (symbol.StartsWith('/'))
+            if (symbol == master_symbol)
+            {
+                //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
+                //100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
+                //100 (Weeklys) 31 MAY 22 4650 PUT,-3,153,176.10,179.90,N/A,"($1,140.00)","($1,140.00)",
+                security_type = "OPT";
+                // lines following are option positions
+                while (line_index < lines.Count)
+                {
+                    line = lines[line_index++]; // use line here because this line might be first line of next position
+                    rc = ParseCSVLine(line, out fields);
+                    if (!rc)
+                    {
+                        Console.WriteLine($"\n***Error*** In TDA file, line {line_index} is not a valid comma separated line: {line}");
+                        return false;
+                    }
+                    string option_spec = fields[instrument_col];
+                    rc = ParseOptionSpec(option_spec, @"100 .*\[(\w+) +(.+) \w+\]$", out tdaPosition.symbol, out tdaPosition.securityType, out tdaPosition.expiration, out tdaPosition.strike);
+                    if (!rc)
+                        break;
+                }
+            }
+            else if (symbol.StartsWith('/'))
             {
                 security_type = "FUT";
                 if (tdaPosition.quantity <= 0)
@@ -495,10 +517,6 @@ static class Program
                     Console.WriteLine($"***Error*** In TDA file, in line {line_index + 1}: futures quantity must be greater than 0");
                     return false;
                 }
-            }
-            else if (symbol == master_symbol)
-            {
-                security_type = "OPT";
             }
             else if (associated_symbols[master_symbol].ContainsKey(symbol))
             {
@@ -668,7 +686,7 @@ static class Program
         strike = 0;
 
         MatchCollection mc = Regex.Matches(field, regex);
-        if (mc.Count > 1)
+        if (mc.Count < 1)
             return false;
         Match match0 = mc[0];
         if (match0.Groups.Count != 3)
