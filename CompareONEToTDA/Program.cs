@@ -430,19 +430,19 @@ static class Program
             bool rc = ParseCSVLine(line, out List<string> fields);
             if (!rc)
             {
-                Console.WriteLine($"\n***Error*** In TDA file, line {line_index + 1} is not a valid comma separated line: {line}");
+                Console.WriteLine($"\n***Error*** In TDA file, line {line_index} is not a valid comma separated line: {line}");
                 return false;
             }
 
             if (fields.Count < index_of_last_required_column + 1)
             {
-                Console.WriteLine($"\n***Error*** In TDA file, at line {line_index + 1}, first line of TDA position must have {index_of_last_required_column + 1} fields, not {fields.Count} fields: {line}");
+                Console.WriteLine($"\n***Error*** In TDA file, at line {line_index}, first line of TDA position must have {index_of_last_required_column + 1} fields, not {fields.Count} fields: {line}");
                 return false;
             }
 
             if (line_index == lines.Count)
             {
-                Console.WriteLine($"\n***Error*** In TDA file, at line {line_index + 1}, each TDA position must consist of at least 2 lines in file, not just 1: {line}");
+                Console.WriteLine($"\n***Error*** In TDA file, at line {line_index}, each TDA position must consist of at least 2 lines in file, not just 1: {line}");
                 return false;
             }
 
@@ -489,11 +489,15 @@ static class Program
             bool irrelevant_position = false;
             if (tdaPosition.symbol == master_symbol)
             {
+                security_type = "OPT";
+                //SPX,,,,,,($330.00),($330.00),$0.00
+                //S&P 500 INDEX,0,,.00,4784.37,-1.98,$0.00,$0.00,
                 //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
                 //100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
                 //100 (Weeklys) 31 MAY 22 4650 PUT,-3,153,176.10,179.90,N/A,"($1,140.00)","($1,140.00)",
-                security_type = "OPT";
-                // lines following are option positions
+
+                // parse lines starting with "100 ", which are options on symbol
+                int num_options = 0;
                 while (line_index < lines.Count)
                 {
                     line = lines[line_index++]; // use line here because this line might be first line of next position
@@ -504,9 +508,19 @@ static class Program
                         return false;
                     }
                     string option_spec = fields[instrument_col];
-                    rc = ParseOptionSpec(option_spec, @"100 .*\[(\w+) +(.+) \w+\]$", out tdaPosition.symbol, out tdaPosition.securityType, out tdaPosition.expiration, out tdaPosition.strike);
-                    if (!rc)
-                        break;
+                    if (!option_spec.StartsWith("100 "))
+                    {
+                        if (num_options == 0) {
+                            Console.WriteLine($"\n***Error*** In TDA file, line {line_index-2} specifies an option, but there are no option position lines.");
+                            return false;
+                        }
+                        break; // line is first line of next position
+                    }
+                }
+                if (num_options == 0)
+                {
+                    Console.WriteLine($"\n***Error*** In TDA file, line {line_index-2} specifies an option, but there are no option position lines.");
+                    return false;
                 }
             }
             else if (tdaPosition.symbol.StartsWith('/'))
