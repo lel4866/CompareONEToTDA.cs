@@ -189,12 +189,29 @@ static class Program
     internal static string master_symbol = "SPX";
     internal static string one_account = "";
 
+    // used to parse option spec
+    readonly internal static Dictionary<string, int> monthDict = new()
+    {
+        { "JAN", 1 },
+        { "FEB", 2 },
+        { "MAR", 3 },
+        { "APR", 4 },
+        { "MAY", 5 },
+        { "JUN", 6 },
+        { "JUL", 7 },
+        { "AUG", 8 },
+        { "SEP", 9 },
+        { "OCT", 10 },
+        { "NOV", 11 },
+        { "DEC", 12 }
+    };
+
     // ONE uses the main index symbol for positions in the underlying, whereas TDA uses an actual stock/futures symbol
     // so...to reconcile these, if ONE has a position, say, of 10 SPX, this could be equivalent to 2 MES contracts,
     // 100 SPY shares, or some combination, like 1 MES contract and 50 SPY shares
     // So...the float is the number of ONE SPX shares that a share of the given item represents. So, { "SPY", 0.1f }
     // means that 1 share of SPY in TDA represents 0.1 shares of SPX in ONE
-    internal static Dictionary<string, Dictionary<string, float>> associated_symbols = new()
+    readonly internal static Dictionary<string, Dictionary<string, float>> associated_symbols = new()
     {
         { "SPX", new Dictionary<string, float> { { "SPY", 0.1f }, { "MES", 5f }, { "ES", 50f } } },
         { "RUT", new Dictionary<string, float> { { "IWM", 0.1f }, { "M2K", 5f }, { "RTY", 50f } } },
@@ -385,12 +402,14 @@ static class Program
 
         int line_index = 0;
         string line = lines[line_index++];
-        if (line.StartsWith(simulated_position_header)) {
+        if (line.StartsWith(simulated_position_header))
+        {
             Console.WriteLine($"\n***Warning*** TDA file starts with line containing phrase '{simulated_position_header}', which indicates these are just simulated positions.");
             line = lines[line_index++];
         }
 
-        if (!line.StartsWith("Position Statement for")) {
+        if (!line.StartsWith("Position Statement for"))
+        {
             Console.WriteLine("***\nError*** TDA file must begin with line containing the phrase 'Position Statement for...'");
             return false;
         }
@@ -424,7 +443,7 @@ static class Program
         }
 
         // now process each TDA position
-        while (line_index  < lines.Count)
+        while (line_index < lines.Count)
         {
             line = lines[line_index++];
             bool rc = ParseCSVLine(line, out List<string> fields);
@@ -490,11 +509,17 @@ static class Program
             if (tdaPosition.symbol == master_symbol)
             {
                 security_type = "OPT";
+
                 //SPX,,,,,,($330.00),($330.00),$0.00
                 //S&P 500 INDEX,0,,.00,4784.37,-1.98,$0.00,$0.00,
                 //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
                 //100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
                 //100 (Weeklys) 31 MAY 22 4650 PUT,-3,153,176.10,179.90,N/A,"($1,140.00)","($1,140.00)",
+                if (tdaPosition.quantity != 0)
+                {
+                    Console.WriteLine($"\n***Error*** In TDA file, line {line_index}, specified quantity for INDEX must be 0, not: {tdaPosition.quantity}");
+                    return false;
+                }
 
                 // parse lines starting with "100 ", which are options on symbol
                 int num_options = 0;
@@ -507,19 +532,81 @@ static class Program
                         Console.WriteLine($"\n***Error*** In TDA file, line {line_index} is not a valid comma separated line: {line}");
                         return false;
                     }
+
                     string option_spec = fields[instrument_col];
                     if (!option_spec.StartsWith("100 "))
                     {
-                        if (num_options == 0) {
-                            Console.WriteLine($"\n***Error*** In TDA file, line {line_index-2} specifies an option, but there are no option position lines.");
+                        if (num_options == 0)
+                        {
+                            Console.WriteLine($"\n***Error*** In TDA file, line {line_index - 2} specifies an option, but there are no option position lines (lines that start with \"100 \").");
                             return false;
                         }
                         break; // line is first line of next position
                     }
+
+                    rc = int.TryParse(fields[quantity_col], out tdaPosition.quantity);
+                    if (!rc)
+                    {
+                        Console.WriteLine($"***Error*** In TDA file, in line {line_index}: invalid Quantity: {fields[quantity_col]}");
+                        return false;
+                    }
+                    if (tdaPosition.quantity == 0)
+                        continue;
+
+                    string[] option_fields = option_spec.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (option_fields.Count() != 5 && option_fields.Count() != 6)
+                    {
+                        Console.WriteLine($"\n***Error*** In TDA file, line {line_index} has an invalid option specification: {option_spec}.");
+                        return false;
+                    }
+                    string option_type_str = option_fields[option_fields.Count() - 1].ToUpper();
+                    switch (option_type_str)
+                    {
+                        case "PUT":
+                            tdaPosition.securityType = SecurityType.Put;
+                            break;
+                        case "CALL":
+                            tdaPosition.securityType = SecurityType.Call;
+                            break;
+                        default:
+                            Console.WriteLine($"\n***Error*** In TDA file, line {line_index} has an invalid option specification: {option_spec}.");
+                            return false;
+                    }
+                    string option_strike_str = option_fields[option_fields.Count() - 2];
+                    rc = int.TryParse(option_strike_str, out tdaPosition.strike);
+                    if (!rc)
+                    {
+                        Console.WriteLine($"\n***Error*** In TDA file, line {line_index} has an invalid option specification: {option_spec}.");
+                        return false;
+                    }
+
+                    string date_str = option_fields[option_fields.Count() - 5] + ' ' + option_fields[option_fields.Count() - 4] + ' ' + option_fields[option_fields.Count() - 3];
+                    rc = DateOnly.TryParseExact(date_str, "dd MMM yy", out tdaPosition.expiration);
+                    if (!rc)
+                    {
+                        Console.WriteLine($"\n***Error*** In TDA file, line {line_index} has an invalid option specification: {option_spec}.");
+                        return false;
+                    }
+
+                    // check if weekly or quarterly
+                    if (option_fields.Count() == 6)
+                    {
+                        switch (option_fields[1])
+                        {
+                            case "(Weeklys)":
+                                break;
+                            case "(Quarterlys)":
+                                break;
+                            default:
+                                break;
+                        } 
+                    }
+
+                    int xxx = 1;
                 }
                 if (num_options == 0)
                 {
-                    Console.WriteLine($"\n***Error*** In TDA file, line {line_index-2} specifies an option, but there are no option position lines.");
+                    Console.WriteLine($"\n***Error*** In TDA file, line {line_index - 2} specifies an option, but there are no option position lines (lines that start with \"100 \").");
                     return false;
                 }
             }
@@ -578,7 +665,7 @@ static class Program
     {
         List<string> lines = new();
         using var reader = new StreamReader(filename);
-        while (true) 
+        while (true)
         {
             string? line = reader.ReadLine();
             if (line == null)
