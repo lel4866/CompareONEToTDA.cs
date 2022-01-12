@@ -554,7 +554,7 @@ static class Program
                         continue;
 
                     string[] option_fields = option_spec.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                    if (option_fields.Count() != 5 && option_fields.Count() != 6)
+                    if (option_fields.Count() != 6 && option_fields.Count() != 7)
                     {
                         Console.WriteLine($"\n***Error*** In TDA file, line {line_index} has an invalid option specification: {option_spec}.");
                         return false;
@@ -589,16 +589,19 @@ static class Program
                     }
 
                     // check if weekly or quarterly
-                    if (option_fields.Count() == 6)
+                    if (option_fields.Count() == 7)
                     {
                         switch (option_fields[1])
                         {
                             case "(Weeklys)":
+                                tdaPosition.symbol += 'W';
                                 break;
                             case "(Quarterlys)":
+                                tdaPosition.symbol += 'W'; // treat Quarterlys as Weeklys, since 
                                 break;
                             default:
-                                break;
+                                Console.WriteLine($"\n***Error*** In TDA file, line {line_index} has an invalid option specification: {option_spec}.");
+                                return false;
                         } 
                     }
 
