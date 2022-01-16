@@ -374,21 +374,25 @@ static class Program
         return latest_full_filename;
     }
 
-    // TDA file looks like:
+    // TDA file looks like (blank lines inserted for clarity):
     //Position Statement for D-16758452 (margin) on 12/29/21 11:49:04
     //
     //None
     //Instrument, Qty, Days, Trade Price,Mark,Mrk Chng, P/L Open, P/L Day, BP Effect
+
     ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
     //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
+
     //SPX,,,,,,($330.00),($330.00),$0.00
     //S&P 500 INDEX,0,,.00,4784.37,-1.98,$0.00,$0.00,
     //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
     //100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
     //100 (Weeklys) 31 MAY 22 4650 PUT,-3,153,176.10,179.90,N/A,"($1,140.00)","($1,140.00)",
+
     //SPY,,,,,,$97.00,$97.00,"$23,828.00"
     //SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
     //100 18 JAN 22 477 PUT,+10,20,5.25,5.365,+.285,$115.00,$115.00,
+
     //...
     //...
     //Cash & Sweep Vehicle
@@ -456,33 +460,19 @@ static class Program
 
             if (fields.Count < index_of_last_required_column + 1)
             {
-                Console.WriteLine($"\n***Error*** In TDA file, at line {line_index}, first line of TDA position must have {index_of_last_required_column + 1} fields, not {fields.Count} fields: {line}");
+                Console.WriteLine($"\n***Error*** In TDA file, at line {line_index}, first line of position must have {index_of_last_required_column + 1} fields, not {fields.Count}");
                 return false;
             }
 
             if (line_index == lines.Count)
             {
-                Console.WriteLine($"\n***Error*** In TDA file, at line {line_index}, each TDA position must consist of at least 2 lines in file, not just 1: {line}");
+                Console.WriteLine($"\n***Error*** In TDA file, at line {line_index}, each position must consist of at least 2 lines in file, not just 1: {line}");
                 return false;
             }
 
             // parse a new position - each position contains 2 or more lines
             // the first line has the following fields: Instrument,Qty,Days,Trade Price, Mark, Mrk Chng,P/L Open, P/L Day, BP Effect 
             // We only use the first field...Instrument to determine instrument type and symbol. All other info comes from the second line
-            // Examples:
-
-            ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
-            //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
-            //100 21 MAR 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
-
-            //SPX,,,,,,($330.00),($330.00),$0.00
-            //S&P 500 INDEX,0,,.00,4784.37,-1.98,$0.00,$0.00,
-            //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
-            //100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
-
-            //SPY,,,,,,$97.00,$97.00,"$23,828.00"
-            //SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
-            //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
 
             // get symbol from first line
             int instrument_col = tda_columns["Instrument"];
@@ -496,6 +486,13 @@ static class Program
                 return false;
             }
 
+            if (fields2.Count < index_of_last_required_column + 1)
+            {
+                Console.WriteLine($"\n***Error*** In TDA file, at line {line_index}, second line of position must have {index_of_last_required_column + 1} fields, not {fields2.Count}");
+                return false;
+            }
+            string symbol2 = fields2[instrument_col];
+
             // get quantity from second line because for index and stocks, quantity in first line is 0 (quantity for index is always 0 in both lines)
             int quantity_col = tda_columns["Qty"];
             rc = int.TryParse(fields2[quantity_col], out int quantity);
@@ -505,21 +502,16 @@ static class Program
                 return false;
             }
 
-            string security_type;
             bool irrelevant_position = false;
             if (symbol == master_symbol)
             {
-                security_type = "OPT"; // this specifies the requested index - scan option positions on following lines that start with "100 "
+                // this is the index position we want to check
 
-                ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
-                //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
                 //SPX,,,,,,($330.00),($330.00),$0.00
                 //S&P 500 INDEX,0,,.00,4784.37,-1.98,$0.00,$0.00,
                 //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
                 //100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
                 //100 (Weeklys) 31 MAY 22 4650 PUT,-3,153,176.10,179.90,N/A,"($1,140.00)","($1,140.00)",
-                //SPY,,,,,,$97.00,$97.00,"$23,828.00"
-                //SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
                 if (quantity != 0)
                 {
                     Console.WriteLine($"\n***Error*** In TDA file, line {line_index}, specified quantity for INDEX must be 0, not: {quantity}");
@@ -534,9 +526,9 @@ static class Program
                     TDAPosition tdaPosition = new(symbol);
                     int irc = ParseTDAOptionLine(line, line_index, instrument_col, quantity_col, ref tdaPosition); // fills in securityType, expiration, and strike
                     if (irc < 0)
-                        return false;
+                        return false; // line has invalid syntax
                     if (irc > 0)
-                        break;
+                        break; // line isn't an option position (doesn't start with "100 "; must be start of next position
 #if false
                     if (!lines[line_index].StartsWith("100 "))
                         break;
@@ -641,7 +633,7 @@ static class Program
             }
             else if (symbol.StartsWith('/'))
             {
-                // This is futures symbol:
+                // This is futures symbol: it is only relevant if it is one of the futures associted with index we are checking
                 ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
                 //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
                 string futures_root = symbol[1..];
@@ -650,7 +642,14 @@ static class Program
                 if (associated_symbols[master_symbol].ContainsKey(futures_root))
                 {
                     // get futures expiration
-                    tdaPosition.expiration = new DateOnly(1500, 6, 6); // todo: finish
+                    string[] futures_fields = symbol2.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                    string futures_date_str = futures_fields[1].Trim();
+                    rc = DateOnly.TryParseExact(futures_date_str, "MMM-yy", out tdaPosition.expiration);
+                    if (!rc)
+                    {
+                        Console.WriteLine($"\n***Error*** In TDA file, line {line_index - 1} has invalid futures contract expiration: {futures_date_str}");
+                        return false;
+                    }
                     var tda_futures_key = new OptionKey(tdaPosition.symbol, tdaPosition.securityType, tdaPosition.expiration, tdaPosition.strike);
                     if (tdaPositions.ContainsKey(tda_futures_key))
                     {
@@ -697,7 +696,8 @@ static class Program
             }
             else
             {
-                // this is stock:
+                // this is stock: it is only relevant if it is one of the stocks associted with index we are checking
+
                 //SPY,,,,,,$97.00,$97.00,"$23,828.00"
                 //SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
                 //100 18 JAN 22 477 PUT,+10,20,5.25,5.365,+.285,$115.00,$115.00,
