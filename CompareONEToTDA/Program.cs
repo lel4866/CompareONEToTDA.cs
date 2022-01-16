@@ -151,20 +151,6 @@ public class OptionKey : IComparable<OptionKey>
     }
 }
 
-//Position Statement for D-16758452 (margin) on 12/29/21 11:49:04
-//
-//None
-//Instrument, Qty, Days, Trade Price,Mark,Mrk Chng, P/L Open, P/L Day, BP Effect
-///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
-//"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
-//SPX,,,,,,($330.00),($330.00),$0.00
-//S&P 500 INDEX,0,,.00,4784.37,-1.98,$0.00,$0.00,
-//100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
-//100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
-//100 (Weeklys) 31 MAY 22 4650 PUT,-3,153,176.10,179.90,N/A,"($1,140.00)","($1,140.00)",
-//SPY,,,,,,$97.00,$97.00,"$23,828.00"
-//SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
-//100 18 JAN 22 477 PUT,+10,20,5.25,5.365,+.285,$115.00,$115.00,
 class TDAPosition
 {
     public SecurityType securityType; // just Put, Call, or Stock...futures are converted to equivalent SPX stock...so is SPY
@@ -388,17 +374,33 @@ static class Program
         return latest_full_filename;
     }
 
+    // TDA file looks like:
     //Position Statement for D-16758452 (margin) on 12/29/21 11:49:04
     //
     //None
-    //Instrument,Qty,Days,Trade Price, Mark, Mrk Chng,P/L Open, P/L Day, BP Effect
+    //Instrument, Qty, Days, Trade Price,Mark,Mrk Chng, P/L Open, P/L Day, BP Effect
     ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
     //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
+    //SPX,,,,,,($330.00),($330.00),$0.00
+    //S&P 500 INDEX,0,,.00,4784.37,-1.98,$0.00,$0.00,
+    //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
+    //100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
+    //100 (Weeklys) 31 MAY 22 4650 PUT,-3,153,176.10,179.90,N/A,"($1,140.00)","($1,140.00)",
+    //SPY,,,,,,$97.00,$97.00,"$23,828.00"
+    //SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
+    //100 18 JAN 22 477 PUT,+10,20,5.25,5.365,+.285,$115.00,$115.00,
+    //...
+    //...
+    //Cash & Sweep Vehicle
+
+    // each TDA position is an index, stock or futures, and consists of 2 or more lines.
+    // option positions on each of these 3 types are lines starting with "100 " that follow the 2 lines defining the main position
+    // futures positions are distinguished because the symbol in the first line starts with '/'
+    // index positions are distinguished from stock positions primarily by the symbol in the first line, but also because the
+    // quantity in the first line is 0 for an index
     static internal bool ProcessTDAFile(string full_filename)
     {
-        const string simulated_position_header = "This document was exported from the paperMoney® platform";
-
-        List<string> lines = ReadAllNonBlankLines(full_filename); // throws away all lines from "Cash & Sweep Vehicle" to end       
+        List<string> lines = ReadAllRelevantLines(full_filename); // throws away all lines from "Cash & Sweep Vehicle" to end       
         if (lines.Count < 5)
         {
             Console.WriteLine("\n***Error*** TDA File must contain at least 5 non-blank lines");
@@ -407,12 +409,6 @@ static class Program
 
         int line_index = 0;
         string line = lines[line_index++];
-        if (line.StartsWith(simulated_position_header))
-        {
-            Console.WriteLine($"\n***Warning*** TDA file starts with line containing phrase '{simulated_position_header}', which indicates these are just simulated positions.");
-            line = lines[line_index++];
-        }
-
         if (!line.StartsWith("Position Statement for"))
         {
             Console.WriteLine("***\nError*** TDA file must begin with line containing the phrase 'Position Statement for...'");
@@ -447,7 +443,7 @@ static class Program
             index_of_last_required_column = Math.Max(colnum, index_of_last_required_column);
         }
 
-        // now process each TDA position
+        // now process each TDA position (stock, index, or futures), each consisting of 2 lines plus option lines starting with "100 "
         while (line_index < lines.Count)
         {
             line = lines[line_index++];
@@ -471,12 +467,13 @@ static class Program
             }
 
             // parse a new position - each position contains 2 or more lines
-            // the first line is: Instrument,Qty,Days,Trade Price, Mark, Mrk Chng,P/L Open, P/L Day, BP Effect 
-            // We only use the first field...Instrument to determine instrument type. All other info comes from the second line
+            // the first line has the following fields: Instrument,Qty,Days,Trade Price, Mark, Mrk Chng,P/L Open, P/L Day, BP Effect 
+            // We only use the first field...Instrument to determine instrument type and symbol. All other info comes from the second line
             // Examples:
 
             ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
             //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
+            //100 21 MAR 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
 
             //SPX,,,,,,($330.00),($330.00),$0.00
             //S&P 500 INDEX,0,,.00,4784.37,-1.98,$0.00,$0.00,
@@ -485,6 +482,7 @@ static class Program
 
             //SPY,,,,,,$97.00,$97.00,"$23,828.00"
             //SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
+            //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
 
             // get symbol from first line
             int instrument_col = tda_columns["Instrument"];
@@ -656,7 +654,7 @@ static class Program
                     var tda_futures_key = new OptionKey(tdaPosition.symbol, tdaPosition.securityType, tdaPosition.expiration, tdaPosition.strike);
                     if (tdaPositions.ContainsKey(tda_futures_key))
                     {
-                        Console.WriteLine($"***Error*** in TDA line {line_index}: duplicate futures contract ({tdaPosition.symbol} {tdaPosition.expiration}})");
+                        Console.WriteLine($"***Error*** in TDA line {line_index}: duplicate futures contract ({tdaPosition.symbol} {tdaPosition.expiration})");
                         return false;
                     }
                     tdaPositions.Add(tda_futures_key, tdaPosition);
@@ -700,28 +698,27 @@ static class Program
             else
             {
                 // this is stock:
+                //SPY,,,,,,$97.00,$97.00,"$23,828.00"
                 //SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
                 //100 18 JAN 22 477 PUT,+10,20,5.25,5.365,+.285,$115.00,$115.00,
+                TDAPosition tdaPosition = new(symbol);
                 tdaPosition.securityType = SecurityType.Stock;
-                if (associated_symbols[master_symbol].ContainsKey(tdaPosition.symbol))
+                var tda_stock_key = new OptionKey(tdaPosition.symbol, tdaPosition.securityType, tdaPosition.expiration, tdaPosition.strike);
+                if (associated_symbols[master_symbol].ContainsKey(symbol))
                 {
                     // This is stock associated with specified index (i.e. SPY for SPX, QQQ for NDX, IWM for RUT):
-                    var tda_stock_key = new OptionKey(tdaPosition.symbol, tdaPosition.securityType, tdaPosition.expiration, tdaPosition.strike);
                     tdaPositions.Add(tda_stock_key, tdaPosition);
                 }
                 else
                 {
                     // This is stock is NOT associated with index; ignore stock position
                     irrelevant_position = true;
-                    if (!irrelevantTDAPositions.ContainsKey(tda_ignore_key))
-                        irrelevantTDAPositions.Add(tda_ignore_key, tdaPosition);
+                    if (!irrelevantTDAPositions.ContainsKey(tda_stock_key))
+                        irrelevantTDAPositions.Add(tda_stock_key, tdaPosition);
                 }
 
-                // ignore any option positions associated with stock
-                var tda_ignore_key = new OptionKey(tdaPosition.symbol, tdaPosition.securityType, tdaPosition.expiration, tdaPosition.strike);
-                if (!irrelevantTDAPositions.ContainsKey(tda_ignore_key))
-                    irrelevantTDAPositions.Add(tda_ignore_key, tdaPosition);
-                while (line_index < lines.Count)
+                // ignore options on stock
+                xwhile (line_index < lines.Count)
                 {
                     if (!lines[line_index].StartsWith("100 "))
                         break;
@@ -841,22 +838,37 @@ static class Program
         return 0;
     }
 
-    static List<string> ReadAllNonBlankLines(string filename)
+    static List<string> ReadAllRelevantLines(string filename)
     {
+        // if the file represents a paper trading file, the file start with an extra line:
+        const string simulated_position_header = "This document was exported from the paperMoney® platform";
+
         List<string> lines = new();
         using var reader = new StreamReader(filename);
         while (true)
         {
             string? line = reader.ReadLine();
+
+            // check for end of file
             if (line == null)
                 break;
+
+            // ignore blank lines
             line = line.Trim();
             if (line.Length == 0)
                 continue;
+
+            // check for final line
             if (line == "Cash & Sweep Vehicle")
                 break;
-            lines.Add(line);
+
+            // check for simulated position line
+            if (lines.Count == 0 && line == simulated_position_header)
+                continue;
+
+            lines.Add(line); // this is relevant line
         }
+
         return lines;
     }
 
