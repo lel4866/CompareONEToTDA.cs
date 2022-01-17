@@ -269,6 +269,11 @@ class TDAPosition : Position
     {
     }
 
+    internal TDAPosition(string symbol, SecurityType type, int quantity) : base(symbol, type)
+    {
+        Quantity = quantity;
+    }
+
     internal TDAPosition(OptionKey optionKey) : base(optionKey.Symbol, optionKey.OptionType, optionKey.Expiration, optionKey.Strike)
     {
     }
@@ -395,8 +400,6 @@ static class Program
         Debug.Assert(ParseCSVLineRC && parseCSVTestFields.Count == 1 && parseCSVTestFields[0] == "1");
         ParseCSVLineRC = ParseCSVLine(-1, 1, "1,2", out parseCSVTestFields); // trailing comma ignored
         Debug.Assert(ParseCSVLineRC && parseCSVTestFields.Count == 2 && parseCSVTestFields[1] == "2");
-        ParseCSVLineRC = ParseCSVLine(-1, 2, "1,2", out parseCSVTestFields); // trailing comma ignored
-        Debug.Assert(!ParseCSVLineRC && parseCSVTestFields.Count == 0);
         //int test1 = 1;
     }
 
@@ -572,7 +575,7 @@ static class Program
         string line = lines[line_index++];
         if (!line.StartsWith("Position Statement for"))
         {
-            Console.WriteLine("***\nError*** TDA file must begin with line containing the phrase 'Position Statement for...'");
+            Console.WriteLine("\n***Error*** TDA file must begin with line containing the phrase 'Position Statement for...'");
             return false;
         }
 
@@ -698,12 +701,12 @@ static class Program
                 ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
                 //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
                 string futures_root = symbol[1..];
-                TDAPosition tdaPosition = new(futures_root, SecurityType.Futures);
+                TDAPosition tdaPosition = new(futures_root, SecurityType.Futures, quantity);
                 if (associated_symbols[master_symbol].ContainsKey(futures_root))
                 {
                     // get futures expiration
                     string[] futures_fields = symbol2.Split(',', StringSplitOptions.RemoveEmptyEntries);
-                    string futures_date_str = futures_fields[1].Trim();
+                    string futures_date_str = futures_fields[1].Trim()[0..6];
                     rc = DateOnly.TryParseExact(futures_date_str, "MMM-yy", out DateOnly expiration);
                     if (!rc)
                     {
@@ -733,6 +736,7 @@ static class Program
                 //SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
                 //100 18 JAN 22 477 PUT,+10,20,5.25,5.365,+.285,$115.00,$115.00,
                 TDAPosition tdaPosition = new(symbol, SecurityType.Stock);
+                tdaPosition.Quantity = quantity;
                 if (associated_symbols[master_symbol].ContainsKey(symbol))
                     tdaPosition.Add(line_index, tdaPositions);
                 else
@@ -763,6 +767,8 @@ static class Program
         if (!rc) return -1;
 
         string quantity_str = fields[tda_quantity_col];
+        if (quantity_str.Length == 0)
+            quantity_str = "0";
         rc = int.TryParse(quantity_str, out int quantity);
         if (!rc)
         {
@@ -834,11 +840,6 @@ static class Program
         return 0;
     }
 
-    static bool AddTDAPositionToIrrelevantPositionsDictionary(TDAPosition tdaPosition)
-    {
-        return true;
-    }
-
     static List<string> ReadAllRelevantLines(string filename)
     {
         // if the file represents a paper trading file, the file start with an extra line:
@@ -860,11 +861,11 @@ static class Program
                 continue;
 
             // check for final line
-            if (line == "Cash & Sweep Vehicle")
+            if (line.StartsWith("Cash & Sweep Vehicle"))
                 break;
 
             // check for simulated position line
-            if (lines.Count == 0 && line == simulated_position_header)
+            if (lines.Count == 0 && line.StartsWith(simulated_position_header))
                 continue;
 
             lines.Add(line); // this is relevant line
