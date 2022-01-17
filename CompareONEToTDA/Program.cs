@@ -269,6 +269,10 @@ class TDAPosition : Position
     {
     }
 
+    internal TDAPosition(OptionKey optionKey) : base(optionKey.Symbol, optionKey.OptionType, optionKey.Expiration, optionKey.Strike)
+    {
+    }
+
     // error (display message, return false) if position already exists
     // programming error if this.Quantity is 0
     internal bool Add(int line_index, HashSet<TDAPosition> tdaPositions)
@@ -276,7 +280,6 @@ class TDAPosition : Position
         Debug.Assert(this.Quantity != 0);
         if (tdaPositions.Contains(this))
         {
-            string type_str;
             switch (Type)
             {
                 case SecurityType.None:
@@ -298,7 +301,7 @@ class TDAPosition : Position
     // in this function, it's ok for the position to already exist...just acumulate quantity
     // return true if resulting quantity is 0; return false if resulting quantity is 0
     // if resulting quantity is 0, position is removed from collection (or not added)
-    internal bool Accumulate(int line_index, HashSet<TDAPosition> tdaPositions)
+    internal bool Accumulate(HashSet<TDAPosition> tdaPositions)
     {
         tdaPositions.TryGetValue(this, out TDAPosition? existingPosition);
         if (existingPosition != null)
@@ -760,12 +763,13 @@ static class Program
         if (!rc) return -1;
 
         string quantity_str = fields[tda_quantity_col];
-        rc = int.TryParse(quantity_str, out tdaPosition.quantity);
+        rc = int.TryParse(quantity_str, out int quantity);
         if (!rc)
         {
             Console.WriteLine($"\n***Error*** In TDA file, line {line_index + 1} has an invalid option quantity: {quantity_str}.");
             return -1;
         }
+        tdaPosition.Quantity = quantity;
 
         string option_spec = fields[tda_symbol_col];
         if (!option_spec.StartsWith("100 "))
@@ -782,10 +786,10 @@ static class Program
         switch (option_type_str)
         {
             case "PUT":
-                tdaPosition.securityType = SecurityType.Put;
+                tdaPosition.Type = SecurityType.Put;
                 break;
             case "CALL":
-                tdaPosition.securityType = SecurityType.Call;
+                tdaPosition.Type = SecurityType.Call;
                 break;
             default:
                 Console.WriteLine($"\n***Error*** In TDA file, line {line_index + 1} has an invalid option specification: {option_spec}.");
@@ -793,20 +797,22 @@ static class Program
         }
 
         string option_strike_str = option_fields[^2];
-        rc = int.TryParse(option_strike_str, out tdaPosition.strike);
+        rc = int.TryParse(option_strike_str, out int strike);
         if (!rc)
         {
             Console.WriteLine($"\n***Error*** In TDA file, line {line_index + 1} has an invalid option specification: {option_spec}.");
             return -1;
         }
+        tdaPosition.Strike = strike;
 
         string date_str = option_fields[^5] + ' ' + option_fields[^4] + ' ' + option_fields[^3];
-        rc = DateOnly.TryParseExact(date_str, "dd MMM yy", out tdaPosition.expiration);
+        rc = DateOnly.TryParseExact(date_str, "dd MMM yy", out DateOnly expiration);
         if (!rc)
         {
             Console.WriteLine($"\n***Error*** In TDA file, line {line_index + 1} has an invalid option specification: {option_spec}.");
             return -1;
         }
+        tdaPosition.Expiration = expiration;
 
         // check if weekly or quarterly
         if (option_fields.Length == 7)
@@ -814,10 +820,10 @@ static class Program
             switch (option_fields[1])
             {
                 case "(Weeklys)":
-                    tdaPosition.symbol += 'W';
+                    tdaPosition.Symbol += 'W';
                     break;
                 case "(Quarterlys)":
-                    tdaPosition.symbol += 'W'; // treat Quarterlys as Weeklys, since ONE doesn't export options as Quarterlys (even though the ONE GUI shows them)
+                    tdaPosition.Symbol += 'W'; // treat Quarterlys as Weeklys, since ONE doesn't export options as Quarterlys (even though the ONE GUI shows them)
                     break;
                 default:
                     Console.WriteLine($"\n***Error*** In TDA file, line {line_index + 1} has an invalid option specification: {option_spec}.");
@@ -898,14 +904,9 @@ static class Program
                 return false;
             if (rc > 0)
                 break;
-            var tda_option_key = new OptionKey(tdaPosition.symbol, tdaPosition.securityType, tdaPosition.expiration, tdaPosition.strike);
-            if (!irrelevantTDAPositions.ContainsKey(tda_option_key))
-                irrelevantTDAPositions.Add(tda_option_key, tdaPosition);
-            else
-            {
-                Console.WriteLine($"***Error*** in TDA line {line_index}: duplicate option position: {tdaPosition.symbol} {tdaPosition.securityType} {tdaPosition.expiration} {tdaPosition.strike}");
+            bool rcb = tdaPosition.Add(line_index, irrelevantTDAPositions);
+            if (!rcb)
                 return false;
-            }
 
             line_index++;
         }
@@ -1437,7 +1438,8 @@ static class Program
             if (one_key.OptionType == SecurityType.Stock)
                 continue;
 
-            if (!tdaPositions.TryGetValue(one_key, out TDAPosition? tda_position))
+            var tda_position = new TDAPosition(one_key);
+            if (!tdaPositions.Contains(tda_position))
             {
                 Console.WriteLine($"\n***Error*** ONE has a {one_key.OptionType} position in trade(s) {string.Join(",", one_trade_ids)}, with no matching position in TDA:");
                 Console.WriteLine($"{one_key.Symbol}\t{one_key.OptionType}\tquantity: {one_quantity}\texpiration: {one_key.Expiration}\tstrike: {one_key.Strike}");
@@ -1445,9 +1447,9 @@ static class Program
                 continue;
             }
 
-            if (one_quantity != tda_position.quantity)
+            if (one_quantity != tda_position.Quantity)
             {
-                Console.WriteLine($"\n***Error*** ONE has a {one_key.OptionType} position in trade(s) {string.Join(",", one_trade_ids)}, whose quantity ({one_quantity}) does not match TDA quantity ({tda_position.quantity}):");
+                Console.WriteLine($"\n***Error*** ONE has a {one_key.OptionType} position in trade(s) {string.Join(",", one_trade_ids)}, whose quantity ({one_quantity}) does not match TDA quantity ({tda_position.Quantity}):");
                 Console.WriteLine($"{one_key.Symbol}\t{one_key.OptionType}\tquantity: {one_quantity}\texpiration: {one_key.Expiration}\tstrike: {one_key.Strike}");
                 rc = false;
             }
@@ -1462,17 +1464,17 @@ static class Program
         // ok...we've gone through all the ONE option positions, and tried to find associated TDA positions. But...
         // there could still be TDA option positions that have no corresponding ONE position
         // loop through all TDA option positions, find associated ONE positions (if they don't exist, display error)
-        foreach (TDAPosition position in tdaPositions.Values)
+        foreach (TDAPosition position in tdaPositions)
         {
             // ignore stock/futures positions...they've already been checked in VerifyStockPositions()
-            if (position.securityType == SecurityType.Stock || position.securityType == SecurityType.Futures)
+            if (position.Type == SecurityType.Stock || position.Type == SecurityType.Futures)
                 continue;
 
-            if (position.one_quantity != position.quantity)
+            if (position.one_quantity != position.Quantity)
             {
                 if (position.one_quantity == 0)
                 {
-                    Console.WriteLine($"\n***Error*** TDA has a {position.securityType} position with no matching position in ONE");
+                    Console.WriteLine($"\n***Error*** TDA has a {position.Type} position with no matching position in ONE");
                     DisplayTDAPosition(position);
                     rc = false;
                 }
@@ -1499,15 +1501,14 @@ static class Program
 
         // get TDA stock/futures positions
         // note that net TDA position could be 0 even if stock/futures positions exist in TDA
-        List<OptionKey> tda_stock_or_futures_keys = tdaPositions.Keys.Where(s => s.OptionType == SecurityType.Stock || s.OptionType == SecurityType.Futures).ToList();
+        List<TDAPosition> tda_stock_or_futures_positions = tdaPositions.Where(s => s.Type == SecurityType.Stock || s.Type == SecurityType.Futures).ToList();
         float tda_stock_or_futures_quantity = 0f;
-        foreach (OptionKey tda_stock_or_futures_key in tda_stock_or_futures_keys)
+        foreach (TDAPosition tda_stock_or_futures_position in tda_stock_or_futures_positions)
         {
             Dictionary<string, float> possible_tda_symbols = associated_symbols[master_symbol];
-            Debug.Assert(possible_tda_symbols.ContainsKey(tda_stock_or_futures_key.Symbol));
-            float multiplier = possible_tda_symbols[tda_stock_or_futures_key.Symbol];
-            float quantity = tdaPositions[tda_stock_or_futures_key].quantity;
-            tda_stock_or_futures_quantity += multiplier * quantity;
+            Debug.Assert(possible_tda_symbols.ContainsKey(tda_stock_or_futures_position.Symbol));
+            float multiplier = possible_tda_symbols[tda_stock_or_futures_position.Symbol];
+            tda_stock_or_futures_quantity += multiplier * tda_stock_or_futures_position.Quantity;
         }
 
         if (one_quantity == tda_stock_or_futures_quantity)
@@ -1662,36 +1663,36 @@ static class Program
     static void DisplayTDAPositions()
     {
         Console.WriteLine($"TDA Positions related to {master_symbol}:");
-        foreach (TDAPosition position in tdaPositions.Values)
+        foreach (TDAPosition position in tdaPositions)
             DisplayTDAPosition(position);
     }
 
     static void DisplayIrrelevantTDAPositions()
     {
         Console.WriteLine($"\nTDA Positions **NOT** related to {master_symbol}:");
-        foreach (TDAPosition position in irrelevantTDAPositions.Values)
+        foreach (TDAPosition position in irrelevantTDAPositions)
             DisplayTDAPosition(position);
     }
 
     static void DisplayTDAPosition(TDAPosition position)
     {
-        if (position.quantity == 0)
+        if (position.Quantity == 0)
             return;
 
-        switch (position.securityType)
+        switch (position.Type)
         {
             case SecurityType.Stock:
                 //Console.WriteLine($"{position.symbol} {position.optionType}: quantity = {position.quantity}");
-                Console.WriteLine($"{position.symbol}\t{position.securityType}\tquantity: {position.quantity}");
+                Console.WriteLine($"{position.Symbol}\t{position.Type}\tquantity: {position.Quantity}");
                 break;
             case SecurityType.Futures:
                 //Console.WriteLine($"{position.symbol} {position.optionType}: expiration = {position.expiration}, quantity = {position.quantity}");
-                Console.WriteLine($"{position.symbol}\t{position.securityType}\tquantity: {position.quantity}\texpiration: {position.expiration}");
+                Console.WriteLine($"{position.Symbol}\t{position.Type}\tquantity: {position.Quantity}\texpiration: {position.Expiration}");
                 break;
             case SecurityType.Call:
             case SecurityType.Put:
                 //Console.WriteLine($"{position.symbol} {position.optionType}: expiration = {position.expiration}, strike = {position.strike}, quantity = {position.quantity}");
-                Console.WriteLine($"{position.symbol}\t{position.securityType}\tquantity: {position.quantity}\texpiration: {position.expiration}\tstrike: {position.strike}");
+                Console.WriteLine($"{position.Symbol}\t{position.Type}\tquantity: {position.Quantity}\texpiration: {position.Expiration}\tstrike: {position.Strike}");
                 break;
         }
     }
