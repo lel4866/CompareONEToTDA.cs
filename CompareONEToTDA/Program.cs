@@ -179,6 +179,8 @@ static class Program
     internal static string one_directory = "";
     internal static string master_symbol = "SPX";
     internal static string one_account = "";
+    internal static int tda_symbol_col;
+    internal static int tda_quantity_col;
 
     // used to parse option spec
     readonly internal static Dictionary<string, int> monthDict = new()
@@ -446,6 +448,8 @@ static class Program
             }
             index_of_last_required_column = Math.Max(colnum, index_of_last_required_column);
         }
+        tda_symbol_col = tda_columns["Instrument"];
+        tda_quantity_col = tda_columns["Qty"];
 
         // now process each TDA position (stock, index, or futures), each consisting of 2 lines plus option lines starting with "100 "
         while (line_index < lines.Count)
@@ -475,8 +479,7 @@ static class Program
             // We only use the first field...Instrument to determine instrument type and symbol. All other info comes from the second line
 
             // get symbol from first line
-            int instrument_col = tda_columns["Instrument"];
-            string symbol = fields[instrument_col];
+            string symbol = fields[tda_symbol_col];
 
             string line2 = lines[line_index++];
             rc = ParseCSVLine(line2, out List<string> fields2);
@@ -491,11 +494,10 @@ static class Program
                 Console.WriteLine($"\n***Error*** In TDA file, at line {line_index}, second line of position must have {index_of_last_required_column + 1} fields, not {fields2.Count}");
                 return false;
             }
-            string symbol2 = fields2[instrument_col];
+            string symbol2 = fields2[tda_symbol_col];
 
             // get quantity from second line because for index and stocks, quantity in first line is 0 (quantity for index is always 0 in both lines)
-            int quantity_col = tda_columns["Qty"];
-            rc = int.TryParse(fields2[quantity_col], out int quantity);
+            rc = int.TryParse(fields2[tda_quantity_col], out int quantity);
             if (!rc)
             {
                 Console.WriteLine($"***Error*** In TDA file, in line {line_index}: invalid Quantity: {fields2[quantity_col]}");
@@ -518,7 +520,7 @@ static class Program
                     return false;
                 }
 
-                // parse following lines that start with "100 ", which are options on master_symbol
+                // get options asociated with this index: parse following lines that start with "100 "
                 int num_options = 0;
                 while (line_index < lines.Count)
                 {
@@ -526,7 +528,7 @@ static class Program
                     TDAPosition tdaPosition = new(symbol);
                     int irc = ParseTDAOptionLine(line, line_index, instrument_col, quantity_col, ref tdaPosition); // fills in securityType, expiration, and strike
                     if (irc < 0)
-                        return false; // line has invalid syntax
+                        return false; // line has invalid syntax; ParseTDAOptionLine() has already display error message
                     if (irc > 0)
                         break; // line isn't an option position (doesn't start with "100 "; must be start of next position
 #if false
@@ -613,7 +615,7 @@ static class Program
                         } 
                     }
 #endif
-                    // add new option
+                    // add new option to tdaPositions collection
                     var tda_option_key = new OptionKey(tdaPosition.symbol, tdaPosition.securityType, tdaPosition.expiration, tdaPosition.strike);
                     if (tdaPositions.ContainsKey(tda_option_key))
                     {
@@ -633,7 +635,8 @@ static class Program
             }
             else if (symbol.StartsWith('/'))
             {
-                // This is futures symbol: it is only relevant if it is one of the futures associted with index we are checking
+                // This is futures symbol: it is only relevant if it is one of the futures associated with index we are checking;
+                // All options on this future are ignored
                 ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
                 //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
                 string futures_root = symbol[1..];
@@ -670,33 +673,16 @@ static class Program
                     irrelevantTDAPositions.Add(tda_ignore_key, tdaPosition);
                 }
 
-                // ignore any option positions on futures
-                irrelevant_position = true;
-                while (line_index < lines.Count)
-                {
-                    if (!lines[line_index].StartsWith("100 "))
-                        break;
-                    tdaPosition = new(futures_root);
-                    int irc = ParseTDAOptionLine(line, line_index, instrument_col, quantity_col, ref tdaPosition); // fills in securityType, expiration, and strike
-                    if (irc < 0)
-                        return false;
-                    if (irc > 0)
-                        break;
-
-                    var tda_option_key = new OptionKey(tdaPosition.symbol, tdaPosition.securityType, tdaPosition.expiration, tdaPosition.strike);
-                    if (irrelevantTDAPositions.ContainsKey(tda_option_key))
-                    {
-                        Console.WriteLine($"***Error*** in TDA line {line_index}: duplicate futures option position: {tdaPosition.symbol} {tdaPosition.securityType} {tdaPosition.expiration} {tdaPosition.strike}");
-                        return false;
-                    }
-                    irrelevantTDAPositions.Add(tda_option_key, tdaPosition);
-
-                    line_index++;
-                }
+                // ignore any following option positions (which would be futures options)
+                IgnoreTDAOptionLines(symbol, lines, ref line_index);  
             }
             else
             {
-                // this is stock: it is only relevant if it is one of the stocks associted with index we are checking
+                // this is a stock or, an index unrelated to the index we are checking
+                // if it is a stock, it is only relevant if it is one of the stocks associated with index we are checking
+                // if it is an index, by this point we know it is not the index we are checking and it is therefore unrelated
+                // the way we know it is a stock or index is that the quantity in the 2nd line is 0 if it is an index
+                // All options on this stock or index are ignored
 
                 //SPY,,,,,,$97.00,$97.00,"$23,828.00"
                 //SPDR S&P500 ETF TRUST TR UNIT ETF,+100,,476.74,476.56,-.31,($18.00),($18.00),
@@ -717,13 +703,9 @@ static class Program
                         irrelevantTDAPositions.Add(tda_stock_key, tdaPosition);
                 }
 
-                // ignore options on stock
-                xwhile (line_index < lines.Count)
-                {
-                    if (!lines[line_index].StartsWith("100 "))
-                        break;
-                    line_index++;
-                }
+                rc = IgnoreTDAOptionLines(symbol, lines, ref line_index);
+                if (!rc)
+                    return false;
             }
 #if false
             if (tdaPositions.ContainsKey(tda_key))
@@ -760,7 +742,7 @@ static class Program
     //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
     //100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
     //100 (Weeklys) 31 MAY 22 4650 PUT,-3,153,176.10,179.90,N/A,"($1,140.00)","($1,140.00)",
-    static internal int ParseTDAOptionLine(string line, int line_index, int instrument_col, int quantity_col, ref TDAPosition tdaPosition)
+    static internal int ParseTDAOptionLine(string line, int line_index, ref TDAPosition tdaPosition)
     {
         bool rc = ParseCSVLine(line, out List<string> fields);
         if (!rc)
@@ -769,7 +751,7 @@ static class Program
             return -1;
         }
 
-        string quantity_str = fields[quantity_col];
+        string quantity_str = fields[tda_quantity_col];
         rc = int.TryParse(quantity_str, out tdaPosition.quantity);
         if (!rc)
         {
@@ -777,7 +759,7 @@ static class Program
             return -1;
         }
 
-        string option_spec = fields[instrument_col];
+        string option_spec = fields[tda_symbol_col];
         if (!option_spec.StartsWith("100 "))
             return 1;
 
@@ -872,7 +854,6 @@ static class Program
         return lines;
     }
 
-
     ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
     //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
     static bool ParseTDAFuturesSpec(string field, string regex, out string symbol, out DateOnly expiration)
@@ -890,6 +871,31 @@ static class Program
         string expiration_string = match0.Groups[2].Value;
         bool rc = DateOnly.TryParse(expiration_string, out expiration); // day of expiration will be incorrect (it will be 1)
         return rc;
+    }
+    
+    internal static bool IgnoreTDAOptionLines(string symbol, List<string> lines, ref int line_index)
+    {
+        // ignore option lines until we get non-option line or end of data
+        while(line_index < lines.Count)
+        {
+            string line = lines[line_index];
+            if (!line.StartsWith("100 "))
+                break;
+            TDAPosition tdaPosition = new(symbol);
+            int rc = ParseTDAOptionLine(line, line_index, ref tdaPosition);
+            var tda_option_key = new OptionKey(tdaPosition.symbol, tdaPosition.securityType, tdaPosition.expiration, tdaPosition.strike);
+            if (!irrelevantTDAPositions.ContainsKey(tda_option_key))
+                irrelevantTDAPositions.Add(tda_option_key, tdaPosition);
+            else
+            {
+                Console.WriteLine($"***Error*** in TDA line {line_index}: duplicate option position: {tdaPosition.symbol} {tdaPosition.securityType} {tdaPosition.expiration} {tdaPosition.strike}");
+                return false;
+            }
+
+            line_index++;
+        }
+
+        return true;
     }
 
     //ONE Detail Report
