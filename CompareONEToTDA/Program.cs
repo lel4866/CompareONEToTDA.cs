@@ -243,15 +243,15 @@ static class Program
     static void RunUnitTests()
     {
         // tests for ParseCSVLine
-        bool ParseCSVLineRC = ParseCSVLine(-1, 0, ",", out List<string> parseCSVTestFields);
+        bool ParseCSVLineRC = ParseCSVLine(-1, ",", out List<string> parseCSVTestFields);
         Debug.Assert(ParseCSVLineRC && parseCSVTestFields.Count == 1 && parseCSVTestFields[0] == "");
         parseCSVTestFields.Clear();
-        ParseCSVLineRC = ParseCSVLine(-1, 0, ",,", out parseCSVTestFields); // trailing comma ignored
+        ParseCSVLineRC = ParseCSVLine(-1, ",,", out parseCSVTestFields); // trailing comma ignored
         Debug.Assert(ParseCSVLineRC && parseCSVTestFields.Count == 2 && parseCSVTestFields[0] == "" && parseCSVTestFields[1] == "");
         parseCSVTestFields.Clear();
-        ParseCSVLineRC = ParseCSVLine(-1, 0, "1,", out parseCSVTestFields); // trailing comma ignored
+        ParseCSVLineRC = ParseCSVLine(-1, "1,", out parseCSVTestFields); // trailing comma ignored
         Debug.Assert(ParseCSVLineRC && parseCSVTestFields.Count == 1 && parseCSVTestFields[0] == "1");
-        ParseCSVLineRC = ParseCSVLine(-1, 1, "1,2", out parseCSVTestFields); // trailing comma ignored
+        ParseCSVLineRC = ParseCSVLine(-1, "1,2", out parseCSVTestFields); // trailing comma ignored
         Debug.Assert(ParseCSVLineRC && parseCSVTestFields.Count == 2 && parseCSVTestFields[1] == "2");
         //int test1 = 1;
     }
@@ -294,7 +294,7 @@ static class Program
         // display TDA positions
         DisplayTDAPositions();
 
-        DisplayIrrelevantIBPositions();
+        DisplayIrrelevantTDAPositions();
 
         rc = CompareONEPositionsToTDAPositions();
         if (!rc)
@@ -372,12 +372,12 @@ static class Program
 
     static (string?, DateOnly) GetTDAFileName(string directory, string? specified_full_filename)
     {
-        Debug.Assert(Directory.Exists(directory));
-
+        bool rc;
         const string filename_pattern = "????-??-??-PositionStatement.csv"; // file names look like: yyyy-mm-dd-PositionStatement.csv
         string[] files;
         DateOnly latestDate = new(1000, 1, 1);
         string latest_full_filename = "";
+        string filename, datestr;
 
         if (specified_full_filename == null)
         {
@@ -391,19 +391,13 @@ static class Program
             bool file_found = false;
             foreach (string full_filename in files)
             {
-                string filename = Path.GetFileName(full_filename);
-                if (filename.Length < filename_pattern.Length)
+                filename = Path.GetFileName(full_filename);
+                datestr = filename[..10]; // yyyy-mm-dd
+                rc = DateOnly.TryParse(datestr, out DateOnly dt);
+                if (!rc)
                     continue;
-                string datestr = filename[..10]; // yyyy-mm-dd
-                if (!int.TryParse(datestr[..4], out int year))
-                    continue;
-                if (!int.TryParse(datestr.AsSpan(5, 2), out int month))
-                    continue;
-                if (!int.TryParse(datestr.AsSpan(8, 2), out int day))
-                    continue;
-
                 file_found = true;
-                DateOnly dt = new(year, month, day);
+
                 if (dt > latestDate)
                 {
                     latestDate = dt;
@@ -413,12 +407,29 @@ static class Program
 
             if (!file_found)
             {
-                Console.WriteLine($"\n***Error*** No TDA Position files found in {directory} with following filename pattern: yyyy-mm--ddPositionStatement.csv");
+                Console.WriteLine($"\n***Error*** No TDA Position files found in {directory} with following filename pattern: yyyy-mm--dd-PositionStatement.csv");
                 return (null, latestDate);
             }
+
+            return (latest_full_filename, latestDate);
         }
 
-        return (latest_full_filename, latestDate);
+        if (!File.Exists(specified_full_filename))
+        {
+            Console.WriteLine($"\n***Error*** Specified TDA file {specified_full_filename} does not exist");
+            return (null, latestDate);
+        }
+
+        filename = Path.GetFileName(specified_full_filename); // this is filename portion of full filename
+        datestr = filename[..10];
+        rc = DateOnly.TryParse(datestr, out latestDate); // day of expiration will be incorrect (it will be 1)
+        if (!rc)
+        {
+            Console.WriteLine($"\n***Error*** Specified TDA file has invalid date: {datestr}");
+            return (null, latestDate);
+        }
+
+        return (specified_full_filename, latestDate);
     }
 
     // TDA file looks like (blank lines inserted for clarity):
@@ -499,7 +510,7 @@ static class Program
         while (line_index < lines.Count)
         {
             line = lines[line_index];
-            bool rc = ParseCSVLine(line_index++, index_of_last_required_column, line, out List<string> fields);
+            bool rc = ParseCSVLine(line_index++, line, out List<string> fields);
             if (!rc) return false;
 
             if (fields.Count < index_of_last_required_column + 1)
@@ -522,7 +533,7 @@ static class Program
             string symbol = fields[tda_description_col];
 
             string line2 = lines[line_index];
-            rc = ParseCSVLine(line_index++, index_of_last_required_column, line2, out List<string> fields2);
+            rc = ParseCSVLine(line_index++, line2, out List<string> fields2);
             if (!rc) return false;
 
             if (fields2.Count < index_of_last_required_column + 1)
@@ -659,7 +670,7 @@ static class Program
     //100 (Weeklys) 31 MAY 22 4650 PUT,-3,153,176.10,179.90,N/A,"($1,140.00)","($1,140.00)",
     static internal int ParseTDAOptionLine(int line_index, string line, ref Position tdaPosition)
     {
-        bool rc = ParseCSVLine(line_index, index_of_last_required_column, line, out List<string> fields);
+        bool rc = ParseCSVLine(line_index, line, out List<string> fields);
         if (!rc) return -1;
 
         string quantity_str = fields[tda_quantity_col];
@@ -769,7 +780,7 @@ static class Program
 
         return lines;
     }
-
+#if false
     ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
     //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
     static bool ParseTDAFuturesSpec(string field, string regex, out string symbol, out DateOnly expiration)
@@ -788,7 +799,7 @@ static class Program
         bool rc = DateOnly.TryParse(expiration_string, out expiration); // day of expiration will be incorrect (it will be 1)
         return rc;
     }
-
+#endif
     internal static bool IgnoreTDAOptionLines(string symbol, List<string> lines, ref int line_index)
     {
         // ignore option lines until we get non-option line or end of data
@@ -937,7 +948,7 @@ static class Program
                 curOneTrade = null;
                 continue;
             }
-            bool rc = ParseCSVLine(line_index, index_of_last_required_column, line, out List<string> fields);
+            bool rc = ParseCSVLine(line_index, line, out List<string> fields);
             if (!rc)
                 return false;
             // fields[0] must be blank; but, I don't check here yet
@@ -1403,7 +1414,7 @@ static class Program
             one_trade_ids = one_position.TradeIds;
         }
 
-        // get TDA stock/futures positions. In reality, stock and futures positions at IB are used to satisfy Index positions in ONE
+        // get TDA stock/futures positions. In reality, stock and futures positions at TDA are used to satisfy Index positions in ONE
         // note that net TDA position could be 0 even if stock/futures positions exist in TDA
         List<Position> tda_stock_or_futures_positions = tdaPositions.Where(s => s.Type == SecurityType.Stock || s.Type == SecurityType.Futures).ToList();
         float tda_stock_or_futures_quantity = 0f;
@@ -1447,18 +1458,16 @@ static class Program
     }
 
     const char delimiter = ',';
-    static bool ParseCSVLine(int line_index, int index_of_last_required_column, string line, out List<string> fields)
+    static bool ParseCSVLine(int line_index, string line, out List<string> fields)
     {
         Debug.Assert(line.Length > 0);
 
         fields = new();
         int state = 0;
         int start = 0;
-        char c = '\0';
-        char prevc = '\0';
+        char c;
         for (int i = 0; i < line.Length; i++)
         {
-            prevc = c;
             c = line[i];
             switch (state)
             {
@@ -1580,13 +1589,6 @@ static class Program
             DisplayTDAPosition(position);
     }
 
-    static void DisplayIrrelevantTDAPositions()
-    {
-        Console.WriteLine($"\nTDA Positions **NOT** related to {master_symbol}:");
-        foreach (Position position in irrelevantTDAPositions)
-            DisplayTDAPosition(position);
-    }
-
     static void DisplayTDAPosition(Position position)
     {
         if (position.Quantity == 0)
@@ -1610,11 +1612,11 @@ static class Program
         }
     }
 
-    static void DisplayIrrelevantIBPositions()
+    static void DisplayIrrelevantTDAPositions()
     {
         if (irrelevantTDAPositions.Count > 0)
         {
-            Console.WriteLine($"\nIB Positions **NOT** related to {master_symbol}:");
+            Console.WriteLine($"\nTDA Positions **NOT** related to {master_symbol}:");
             foreach (Position position in irrelevantTDAPositions)
                 DisplayTDAPosition(position);
         }
