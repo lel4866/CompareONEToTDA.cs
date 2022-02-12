@@ -375,39 +375,47 @@ static class Program
         Debug.Assert(Directory.Exists(directory));
 
         const string filename_pattern = "????-??-??-PositionStatement.csv"; // file names look like: yyyy-mm-dd-PositionStatement.csv
-
         string[] files;
         DateOnly latestDate = new(1000, 1, 1);
         string latest_full_filename = "";
 
-        files = Directory.GetFiles(tda_directory, filename_pattern, SearchOption.TopDirectoryOnly);
-        bool file_found = false;
-        foreach (string full_filename in files)
+        if (specified_full_filename == null)
         {
-            string filename = Path.GetFileName(full_filename);
-            if (filename.Length < filename_pattern.Length)
-                continue;
-            string datestr = filename[..10]; // yyyy-mm-dd
-            if (!int.TryParse(datestr[..4], out int year))
-                continue;
-            if (!int.TryParse(datestr.AsSpan(5, 2), out int month))
-                continue;
-            if (!int.TryParse(datestr.AsSpan(8, 2), out int day))
-                continue;
-
-            file_found = true;
-            DateOnly dt = new(year, month, day);
-            if (dt > latestDate)
+            if (!Directory.Exists(directory))
             {
-                latestDate = dt;
-                latest_full_filename = full_filename;
+                Console.WriteLine($"\n***Error*** Specified TDA directory {directory} does not exist");
+                return (null, latestDate);
             }
-        }
 
-        if (!file_found)
-        {
-            Console.WriteLine($"\n***Error*** No TDA Position files found in {directory} with following filename pattern: yyyy-mm--ddPositionStatement.csv");
-            return (null, latestDate);
+            files = Directory.GetFiles(tda_directory, filename_pattern, SearchOption.TopDirectoryOnly);
+            bool file_found = false;
+            foreach (string full_filename in files)
+            {
+                string filename = Path.GetFileName(full_filename);
+                if (filename.Length < filename_pattern.Length)
+                    continue;
+                string datestr = filename[..10]; // yyyy-mm-dd
+                if (!int.TryParse(datestr[..4], out int year))
+                    continue;
+                if (!int.TryParse(datestr.AsSpan(5, 2), out int month))
+                    continue;
+                if (!int.TryParse(datestr.AsSpan(8, 2), out int day))
+                    continue;
+
+                file_found = true;
+                DateOnly dt = new(year, month, day);
+                if (dt > latestDate)
+                {
+                    latestDate = dt;
+                    latest_full_filename = full_filename;
+                }
+            }
+
+            if (!file_found)
+            {
+                Console.WriteLine($"\n***Error*** No TDA Position files found in {directory} with following filename pattern: yyyy-mm--ddPositionStatement.csv");
+                return (null, latestDate);
+            }
         }
 
         return (latest_full_filename, latestDate);
@@ -1053,16 +1061,16 @@ static class Program
             {
                 if (one_trade.Positions.Count != 0)
                 {
-                    Console.WriteLine($"\n***Error*** Trade {one_trade.TradeId} is closed, but contains positions:");
+                    Console.WriteLine($"\n***Error*** Trade #{one_trade.TradeId} {one_trade.TradeName} is closed, but contains positions:");
                 }
                 else
                 {
-                    Console.WriteLine($"\nTrade {one_trade.TradeId}: Closed. No positions");
+                    Console.WriteLine($"\nTrade #{one_trade.TradeId} {one_trade.TradeName}: Closed. No positions");
                     continue;
                 }
             }
             else
-                Console.WriteLine($"\nTrade {one_trade.TradeId}:");
+                Console.WriteLine($"\nTrade #{one_trade.TradeId} {one_trade.TradeName}:");
 
             if (one_trade.Positions.Count == 0)
             {
@@ -1523,7 +1531,6 @@ static class Program
                 return false;
 
             case 3: // field ended with quote
-                string dbg = line[start..^1];
                 fields.Add(line[start..^1].Trim());
                 break;
 
