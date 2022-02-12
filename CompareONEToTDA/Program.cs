@@ -372,7 +372,7 @@ static class Program
 
     static (string?, DateOnly) GetTDAFileName(string directory, string? specified_full_filename)
     {
-        Debug.Assert(Directory.Exists(tda_directory));
+        Debug.Assert(Directory.Exists(directory));
 
         const string filename_pattern = "????-??-??-PositionStatement.csv"; // file names look like: yyyy-mm-dd-PositionStatement.csv
 
@@ -406,7 +406,7 @@ static class Program
 
         if (!file_found)
         {
-            Console.WriteLine($"\n***Error*** No TDA Position files found in {tda_directory} with following filename pattern: yyyy-mm--ddPositionStatement.csv");
+            Console.WriteLine($"\n***Error*** No TDA Position files found in {directory} with following filename pattern: yyyy-mm--ddPositionStatement.csv");
             return (null, latestDate);
         }
 
