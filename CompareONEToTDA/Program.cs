@@ -339,8 +339,9 @@ static class Program
                     tdaPosition.Add(line_index, ONE.brokerPositions);
                 else
                     tdaPosition.Add(line_index, ONE.irrelevantBrokerPositions);
-                line_index++;
 
+                // ignore options on stock (or unrelated index)
+                line_index++; // start with line after stock line
                 rc = IgnoreTDAOptionLines(symbol, lines, ref line_index);
                 if (!rc)
                     return false;

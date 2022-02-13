@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace CompareONEToBroker;
 
-public enum SecurityType
+internal enum SecurityType
 {
     Put,
     Call,
@@ -146,7 +146,6 @@ class Position : IComparable<Position>
         positions.Add(this);
         return true;
     }
-
 }
 
 //,Account,Expiration,TradeId,TradeName,Underlying,Status,TradeType,OpenDate,CloseDate,DaysToExpiration,DaysInTrade,Margin,Comms,PnL,PnLperc
