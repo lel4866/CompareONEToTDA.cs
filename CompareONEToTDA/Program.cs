@@ -257,23 +257,25 @@ static class Program
                 int num_options = 0;
                 while (line_index < lines.Count)
                 {
-                    line = lines[line_index]; // use line here because this line might be first line of next position
+                    line = lines[line_index++]; // use line here because this line might be first line of next position
                     var tdaPosition = new Position(isONEPosition: false) { Symbol = symbol };
-                    int irc = ParseTDAOptionLine(line_index, line, ref tdaPosition); // fills in securityType, expiration, strike, and quantity
+                    int irc = ParseTDAOptionLine(line_index-1, line, ref tdaPosition); // fills in securityType, expiration, strike, and quantity
                     if (irc < 0)
                         return false; // line has invalid syntax; ParseTDAOptionLine() has already display error message
                     if (irc > 0)
+                    {
+                        --line_index; // reprocess this line
                         break; // line isn't an option position (doesn't start with "100 "; must be start of next position
+                    }
                     if (tdaPosition.Quantity == 0)
                         continue; // ignore option positions with 0 quantity
 
                     // add new option to tdaPositions collection
-                    rc = tdaPosition.Add(line_index, ONE.brokerPositions);
+                    rc = tdaPosition.Add(line_index-1, ONE.brokerPositions);
                     if (!rc)
                         return false;
 
                     num_options++;
-                    line_index++;
                 }
 
                 if (num_options == 0)
@@ -288,8 +290,11 @@ static class Program
                 // All options on this future are ignored
                 ///MES,+1,,4777.50,4776.25,-2.25,($6.25),($6.25),"($1,265.00)"
                 //"Micro E-mini S&P 500, Mar-22 (prev. /MESH2)",+1,79,4777.50,4776.25,-2.25,($6.25),($6.25),
-                if (quantity == 0)
-                    return true; // ignore future positions with 0 quantity
+                if (quantity <= 0)
+                {
+                    Console.WriteLine($"\n***Error*** In TDA file, line {line_index - 1} specifies a futures position  in {symbol} with quantity {quantity}: {line}");
+                    return false;
+                }
 
                 string futures_root = symbol[1..];
                 Position tdaPosition = new(false) { Symbol = futures_root, Type = SecurityType.Futures, Quantity = quantity };
@@ -329,12 +334,12 @@ static class Program
                 if (quantity == 0)
                     return true; // ignore stock positions with 0 quantity
 
-                Position tdaPosition = new(false) { Symbol = symbol, Type = SecurityType.Stock };
-                tdaPosition.Quantity = quantity;
+                Position tdaPosition = new(false) { Symbol = symbol, Type = SecurityType.Stock, Quantity = quantity };
                 if (ONE.associated_symbols[ONE.master_symbol].ContainsKey(symbol))
                     tdaPosition.Add(line_index, ONE.brokerPositions);
                 else
                     tdaPosition.Add(line_index, ONE.irrelevantBrokerPositions);
+                line_index++;
 
                 rc = IgnoreTDAOptionLines(symbol, lines, ref line_index);
                 if (!rc)
@@ -355,7 +360,7 @@ static class Program
         return true;
     }
 
-    // returns 0 if valid option, -1 if invalid, +1 if line does not start with "100 " (not n option line)
+    // returns 0 if valid option, -1 if invalid, +1 if line does not start with "100 " (not an option line)
     //100 21 JAN 22 4795 PUT,+1,22,63.50,63.20,N/A,($30.00),($30.00),
     //100 (Quarterlys) 31 MAR 22 4795 CALL,+2,92,141.30,140.25,-4.85,($210.00),($210.00),
     //100 (Weeklys) 31 MAY 22 4650 PUT,-3,153,176.10,179.90,N/A,"($1,140.00)","($1,140.00)",
@@ -377,7 +382,7 @@ static class Program
 
         string option_spec = fields[ONE.broker_description_col];
         if (!option_spec.StartsWith("100 "))
-            return 1;
+            return 1; // not an option...must be stock or futures
 
         string[] option_fields = option_spec.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (option_fields.Length != 6 && option_fields.Length != 7)
