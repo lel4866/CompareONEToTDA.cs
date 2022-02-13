@@ -48,7 +48,7 @@ static class Program
         Console.WriteLine($"Processing {ONE.broker} file: {ONE.broker_filename}");
 
         bool rc = ONE.ProcessONEFile(ONE.one_filename);
-        if (rc)
+        if (!rc)
             return -1;
 
         rc = ProcessTDAFile(ONE.broker_filename);
@@ -161,32 +161,18 @@ static class Program
     //
     static internal bool ProcessTDAFile(string full_filename)
     {
-        List<string> lines = ReadAllRelevantLines(full_filename); // throws away all lines from "Cash & Sweep Vehicle" to end       
-        if (lines.Count < 5)
+        // sets line_index to index of header; throws away all lines after first blank line after header
+        List<string> lines = ReadAllRelevantLines(full_filename, out int line_index);
+        if (lines.Count < 2)
         {
-            Console.WriteLine("\n***Error*** TDA File must contain at least 5 non-blank lines");
+            Console.WriteLine("\n***Error*** TDA File contains no positions.");
             return false;
         }
 
-        int line_index = 0;
-        string line = lines[line_index++];
-        if (!line.StartsWith("Position Statement for"))
-        {
-            Console.WriteLine("\n***Error*** TDA file must begin with line containing the phrase 'Position Statement for...'");
-            return false;
-        }
-
-        line = lines[line_index++];
-        if (line != "None")
-        {
-            Console.WriteLine("***\nError*** In TDA file, line containing the word 'None' must follow line conatining phrase 'Position Statement for...'");
-            return false;
-        }
-
-        // check for required columns and get index of last required column
+        // check header for required columns and get index of last required column
         string[] required_columns = { "Instrument", "Qty" };
-        line = lines[line_index++];
-        string[] column_names = line.Split(',');
+        string header = lines[line_index++]; // get header
+        string[] column_names = header.Split(',');
         for (int i = 0; i < column_names.Length; i++)
         {
             string column_name = column_names[i].Trim();
@@ -206,6 +192,7 @@ static class Program
         ONE.broker_quantity_col = ONE.broker_columns["Qty"];
 
         // now process each TDA position (stock, index, or futures), each consisting of 2 lines plus option lines starting with "100 "
+        string line;
         bool irrelevant_position = false;
         while (line_index < lines.Count)
         {
@@ -451,13 +438,15 @@ static class Program
         return 0;
     }
 
-    static List<string> ReadAllRelevantLines(string filename)
+    // returns all lines up to second blank line; set line_index to header line
+    static List<string> ReadAllRelevantLines(string filename, out int line_index)
     {
-        // if the file represents a paper trading file, the file start with an extra line:
-        const string simulated_position_header = "This document was exported from the paperMoney® platform";
+        const string headerStart = "Instrument,Qty";
 
         List<string> lines = new();
         using var reader = new StreamReader(filename);
+        bool headerFound = false;
+        line_index = 0;
         while (true)
         {
             string? line = reader.ReadLine();
@@ -466,18 +455,18 @@ static class Program
             if (line == null)
                 break;
 
-            // ignore blank lines
+            // check for header
+            if (!headerFound) {
+                if (line.StartsWith(headerStart))
+                    headerFound = true;
+                else
+                    line_index++;
+            }
+
+            // break if blank line after header
             line = line.Trim();
-            if (line.Length == 0)
-                continue;
-
-            // check for final line
-            if (line.StartsWith("Cash & Sweep Vehicle"))
-                break;
-
-            // check for simulated position line
-            if (lines.Count == 0 && line.StartsWith(simulated_position_header))
-                continue;
+            if (headerFound && line.Length == 0)
+                break; ;
 
             lines.Add(line); // this is relevant line
         }
