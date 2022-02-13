@@ -24,7 +24,7 @@ static class Program
 
     static int Main(string[] args)
     {
-#if true
+#if false
         ONE.RunUnitTests();
 #endif
 
