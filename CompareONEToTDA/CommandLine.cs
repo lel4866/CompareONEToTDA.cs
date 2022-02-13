@@ -1,4 +1,4 @@
-﻿namespace CompareONEToTDA;
+﻿namespace CompareONEToBroker;
 
 internal static class CommandLine
 {
@@ -25,7 +25,7 @@ internal static class CommandLine
                 {
                     case "-v":
                     case "--version":
-                        Console.WriteLine("CompareONEToTDA version " + Program.version);
+                        Console.WriteLine("CompareONEToTDA version " + ONE.version);
                         System.Environment.Exit(0);
                         break;
                     case "-s":
@@ -105,7 +105,7 @@ internal static class CommandLine
                         break;
                     case "-h":
                     case "--help":
-                        Console.WriteLine("CompareONEToTDA version " + Program.version);
+                        Console.WriteLine("CompareONEToTDA version " + ONE.version);
                         Console.WriteLine("Compare OptionnetExplorer positions with TD Ameritrade positions");
                         Console.WriteLine("Program will compare positions in the latest file in each of the specified directories");
                         Console.WriteLine("\nCommand line arguments:");
@@ -130,12 +130,12 @@ internal static class CommandLine
                 {
                     case "symbol":
                         string uc_arg = arg.ToUpper();
-                        if (!Program.associated_symbols.ContainsKey(uc_arg))
+                        if (!ONE.associated_symbols.ContainsKey(uc_arg))
                         {
                             Console.WriteLine("***Command Line Error*** Unknown symbol: " + uc_arg + ". Program exiting.");
                             System.Environment.Exit(-1);
                         }
-                        Program.master_symbol = uc_arg;
+                        ONE.master_symbol = uc_arg;
                         break;
 
 
@@ -148,7 +148,7 @@ internal static class CommandLine
                                 Console.WriteLine("***Command Line Error*** TDA File: " + arg + " does not exist. Program exiting.");
                             exit = true;
                         }
-                        Program.tda_filename = arg;
+                        ONE.broker_filename = arg;
                         break;
 
                     case "tdadir":
@@ -163,7 +163,7 @@ internal static class CommandLine
                         arg_with_backslash = arg;
                         if (!arg.EndsWith('\\'))
                             arg_with_backslash += '\\';
-                        Program.tda_directory = arg_with_backslash;
+                        ONE.broker_directory = arg_with_backslash;
                         break;
 
                     case "onefile":
@@ -175,7 +175,7 @@ internal static class CommandLine
                                 Console.WriteLine("***Command Line Error*** ONE File: " + arg + " does not exist. Program exiting.");
                             exit = true;
                         }
-                        Program.one_filename = arg;
+                        ONE.one_filename = arg;
                         break;
 
                     case "onedir":
@@ -190,7 +190,7 @@ internal static class CommandLine
                         arg_with_backslash = arg;
                         if (!arg.EndsWith('\\'))
                             arg_with_backslash += '\\';
-                        Program.one_directory = arg_with_backslash;
+                        ONE.one_directory = arg_with_backslash;
                         break;
                 }
                 arg_name = null;
@@ -203,7 +203,7 @@ internal static class CommandLine
         if (!symbol_specified)
         {
             // default is spx
-            Program.master_symbol = "SPX";
+            ONE.master_symbol = "SPX";
         }
 
         if (!td_specified && !tf_specified)
@@ -214,7 +214,7 @@ internal static class CommandLine
                 curdir = VSProjectDir;
             curdir = Path.GetFullPath(curdir + "/TDAExport/"); // use GetFullPath to get "normalized" directory path
             if (Directory.Exists(curdir))
-                Program.tda_directory = curdir;
+                ONE.broker_directory = curdir;
             else
             {
                 Console.WriteLine("***Command Line Error*** No TDA file (--tdafile) or directory (--tdadir) specified, and default directory (cwd/TDAExport) doesn't exist");
@@ -230,7 +230,7 @@ internal static class CommandLine
                 curdir = VSProjectDir;
             curdir = Path.GetFullPath(curdir + "/ONEExport/"); // use GetFullPath to get "normalized" directory path
             if (Directory.Exists(curdir))
-                Program.one_directory = curdir;
+                ONE.one_directory = curdir;
             else
             {
                 Console.WriteLine("***Command Line Error*** No ONE file (--onefile) or directory (--onedir) specified, and default directory (cwd/ONEExport) doesn't exist");
